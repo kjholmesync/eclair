@@ -133,6 +133,7 @@ case class TxInitRbf(channelId: ByteVector32,
                      feerate: FeeratePerKw,
                      tlvStream: TlvStream[TxInitRbfTlv] = TlvStream.empty) extends InteractiveTxMessage with HasChannelId {
   val fundingContribution: Satoshi = tlvStream.get[TxRbfTlv.SharedOutputContributionTlv].map(_.amount).getOrElse(0 sat)
+  val requestFunds_opt: Option[ChannelTlv.RequestFunds] = tlvStream.get[ChannelTlv.RequestFunds]
 }
 
 object TxInitRbf {
@@ -143,6 +144,7 @@ object TxInitRbf {
 case class TxAckRbf(channelId: ByteVector32,
                     tlvStream: TlvStream[TxAckRbfTlv] = TlvStream.empty) extends InteractiveTxMessage with HasChannelId {
   val fundingContribution: Satoshi = tlvStream.get[TxRbfTlv.SharedOutputContributionTlv].map(_.amount).getOrElse(0 sat)
+  val willFund_opt: Option[ChannelTlv.WillFund] = tlvStream.get[ChannelTlv.WillFund]
 }
 
 object TxAckRbf {
@@ -235,6 +237,7 @@ case class OpenDualFundedChannel(chainHash: BlockHash,
   val upfrontShutdownScript_opt: Option[ByteVector] = tlvStream.get[ChannelTlv.UpfrontShutdownScriptTlv].map(_.script)
   val channelType_opt: Option[ChannelType] = tlvStream.get[ChannelTlv.ChannelTypeTlv].map(_.channelType)
   val requireConfirmedInputs: Boolean = tlvStream.get[ChannelTlv.RequireConfirmedInputsTlv].nonEmpty
+  val requestFunds_opt: Option[ChannelTlv.RequestFunds] = tlvStream.get[ChannelTlv.RequestFunds]
   val pushAmount: MilliSatoshi = tlvStream.get[ChannelTlv.PushAmountTlv].map(_.amount).getOrElse(0 msat)
 }
 
@@ -258,6 +261,7 @@ case class AcceptDualFundedChannel(temporaryChannelId: ByteVector32,
   val upfrontShutdownScript_opt: Option[ByteVector] = tlvStream.get[ChannelTlv.UpfrontShutdownScriptTlv].map(_.script)
   val channelType_opt: Option[ChannelType] = tlvStream.get[ChannelTlv.ChannelTypeTlv].map(_.channelType)
   val requireConfirmedInputs: Boolean = tlvStream.get[ChannelTlv.RequireConfirmedInputsTlv].nonEmpty
+  val willFund_opt: Option[ChannelTlv.WillFund] = tlvStream.get[ChannelTlv.WillFund]
   val pushAmount: MilliSatoshi = tlvStream.get[ChannelTlv.PushAmountTlv].map(_.amount).getOrElse(0 msat)
 }
 
@@ -286,6 +290,7 @@ case class SpliceInit(channelId: ByteVector32,
                       fundingPubKey: PublicKey,
                       tlvStream: TlvStream[SpliceInitTlv] = TlvStream.empty) extends ChannelMessage with HasChannelId {
   val requireConfirmedInputs: Boolean = tlvStream.get[ChannelTlv.RequireConfirmedInputsTlv].nonEmpty
+  val requestFunds_opt: Option[ChannelTlv.RequestFunds] = tlvStream.get[ChannelTlv.RequestFunds]
   val pushAmount: MilliSatoshi = tlvStream.get[ChannelTlv.PushAmountTlv].map(_.amount).getOrElse(0 msat)
 }
 
@@ -304,6 +309,7 @@ case class SpliceAck(channelId: ByteVector32,
                      fundingPubKey: PublicKey,
                      tlvStream: TlvStream[SpliceAckTlv] = TlvStream.empty) extends ChannelMessage with HasChannelId {
   val requireConfirmedInputs: Boolean = tlvStream.get[ChannelTlv.RequireConfirmedInputsTlv].nonEmpty
+  val willFund_opt: Option[ChannelTlv.WillFund] = tlvStream.get[ChannelTlv.WillFund]
   val pushAmount: MilliSatoshi = tlvStream.get[ChannelTlv.PushAmountTlv].map(_.amount).getOrElse(0 msat)
 }
 
@@ -472,6 +478,8 @@ case class NodeAnnouncement(signature: ByteVector64,
                             alias: String,
                             addresses: List[NodeAddress],
                             tlvStream: TlvStream[NodeAnnouncementTlv] = TlvStream.empty) extends RoutingMessage with AnnouncementMessage with HasTimestamp {
+
+  val liquidityRates_opt: Option[LiquidityAds.LeaseRates] = tlvStream.get[NodeAnnouncementTlv.LiquidityAdsTlv].map(_.leaseRates)
 
   val validAddresses: List[NodeAddress] = {
     // if port is equal to 0, SHOULD ignore ipv6_addr OR ipv4_addr OR hostname; SHOULD ignore Tor v2 onion services.
