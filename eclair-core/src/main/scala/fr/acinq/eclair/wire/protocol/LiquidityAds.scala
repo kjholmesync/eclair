@@ -16,15 +16,19 @@
 
 package fr.acinq.eclair.wire.protocol
 
-import fr.acinq.bitcoin.scalacompat.Satoshi
+import fr.acinq.bitcoin.scalacompat.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoin.scalacompat.{ByteVector64, Crypto, Satoshi}
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.payment.relay.Relayer.RelayFees
 import fr.acinq.eclair.transactions.Transactions
-import fr.acinq.eclair.wire.protocol.CommonCodecs.satoshi32
+import fr.acinq.eclair.wire.protocol.CommonCodecs.{blockHeight, millisatoshi32, publicKey, satoshi32}
 import fr.acinq.eclair.wire.protocol.TlvCodecs.tmillisatoshi32
-import fr.acinq.eclair.{CltvExpiryDelta, MilliSatoshi, ToMilliSatoshiConversion}
+import fr.acinq.eclair.{BlockHeight, CltvExpiryDelta, MilliSatoshi, ToMilliSatoshiConversion}
 import scodec.Codec
+import scodec.bits.ByteVector
 import scodec.codecs._
+
+import java.nio.charset.StandardCharsets
 
 /**
  * Created by t-bast on 02/01/2023.
@@ -79,5 +83,31 @@ object LiquidityAds {
       ("lease_fee_base_sat" | satoshi32) ::
       ("channel_fee_max_base_msat" | tmillisatoshi32)
     ).as[LeaseRates]
+
+  /** The seller signs the lease parameters: if they cheat, the buyer can use that signature to prove they cheated. */
+  case class LeaseWitness(fundingPubKey: PublicKey, leaseEnd: BlockHeight, leaseDuration: Int, maxRelayFeeProportional: Int, maxRelayFeeBase: MilliSatoshi)
+
+  object LeaseWitness {
+    def apply(fundingPubKey: PublicKey, leaseEnd: BlockHeight, leaseDuration: Int, leaseRates: LeaseRates): LeaseWitness = {
+      LeaseWitness(fundingPubKey, leaseEnd, leaseDuration, leaseRates.maxRelayFeeProportional, leaseRates.maxRelayFeeBase)
+    }
+
+    def sign(nodeKey: PrivateKey, witness: LeaseWitness): ByteVector64 = {
+      Crypto.sign(Crypto.sha256(leaseWitnessCodec.encode(witness).require.bytes), nodeKey)
+    }
+
+    def verify(nodeId: PublicKey, sig: ByteVector64, witness: LeaseWitness): Boolean = {
+      Crypto.verifySignature(Crypto.sha256(leaseWitnessCodec.encode(witness).require.bytes), sig, nodeId)
+    }
+  }
+
+  private val leaseWitnessCodec: Codec[LeaseWitness] = (
+    ("tag" | constant(ByteVector("option_will_fund".getBytes(StandardCharsets.US_ASCII)))) ::
+      ("funding_pubkey" | publicKey) ::
+      ("lease_end" | blockHeight) ::
+      ("lease_duration" | uint32.xmap(l => l.toInt, (i: Int) => i.toLong)) ::
+      ("channel_fee_max_basis" | uint16) ::
+      ("channel_fee_max_base_msat" | millisatoshi32)
+    ).as[LeaseWitness]
 
 }
