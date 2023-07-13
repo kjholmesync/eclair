@@ -84,7 +84,6 @@ class ChannelRelayerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("a
   def setConfidence(f: FixtureParam)(value: Double): Unit = {
     import f._
 
-    reputationRecorder.expectMessageType[ReputationRecorder.AttemptRelay]
     val getConfidence = reputationRecorder.expectMessageType[ReputationRecorder.GetConfidence]
     assert(getConfidence.originNode == TestConstants.Alice.nodeParams.nodeId)
     getConfidence.replyTo ! ReputationRecorder.Confidence(value)

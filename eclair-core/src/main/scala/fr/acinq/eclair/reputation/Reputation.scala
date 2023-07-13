@@ -17,7 +17,7 @@
 package fr.acinq.eclair.reputation
 
 import fr.acinq.eclair.reputation.Reputation.Pending
-import fr.acinq.eclair.{MilliSatoshi, NodeParams, TimestampMilli}
+import fr.acinq.eclair.{MilliSatoshi, TimestampMilli}
 
 import java.util.UUID
 import scala.concurrent.duration.FiniteDuration
@@ -32,8 +32,9 @@ case class Reputation(pastWeight: Double, pending: Map[UUID, Pending], pastScore
 
   def cancel(relayId: UUID): Reputation = copy(pending = pending - relayId)
 
-  def record(relayId: UUID, isSuccess: Boolean, now: TimestampMilli = TimestampMilli.now()): Reputation = {
-    val p = pending.getOrElse(relayId, Pending(MilliSatoshi(0), now))
+  def record(relayId: UUID, isSuccess: Boolean, feeOverride: Option[MilliSatoshi] = None, now: TimestampMilli = TimestampMilli.now()): Reputation = {
+    var p = pending.getOrElse(relayId, Pending(MilliSatoshi(0), now))
+    feeOverride.foreach(fee => p = p.copy(fee = fee))
     val newWeight = pastWeight + p.weight(now, minDuration)
     val newScore = if (isSuccess) pastScore + p.fee.toLong.toDouble else pastScore
     if (newWeight > maxWeight) {

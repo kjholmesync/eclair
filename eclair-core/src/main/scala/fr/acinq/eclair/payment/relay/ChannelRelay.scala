@@ -30,7 +30,7 @@ import fr.acinq.eclair.payment.Monitoring.{Metrics, Tags}
 import fr.acinq.eclair.payment.relay.Relayer.{OutgoingChannel, OutgoingChannelParams}
 import fr.acinq.eclair.payment.{ChannelPaymentRelayed, IncomingPaymentPacket}
 import fr.acinq.eclair.reputation.ReputationRecorder
-import fr.acinq.eclair.reputation.ReputationRecorder.{AttemptRelay, CancelRelay, GetConfidence, RecordResult}
+import fr.acinq.eclair.reputation.ReputationRecorder.{CancelRelay, GetConfidence, RecordResult}
 import fr.acinq.eclair.wire.protocol.FailureMessageCodecs.createBadOnionFailure
 import fr.acinq.eclair.wire.protocol.PaymentOnion.IntermediatePayload
 import fr.acinq.eclair.wire.protocol._
@@ -59,7 +59,7 @@ object ChannelRelay {
 
   def apply(nodeParams: NodeParams,
             register: ActorRef,
-            reputationRecorder: typed.ActorRef[ReputationRecorder.Command],
+            reputationRecorder: typed.ActorRef[ReputationRecorder.StandardCommand],
             channels: Map[ByteVector32, Relayer.OutgoingChannel],
             originNode:PublicKey,
             relayId: UUID,
@@ -70,8 +70,7 @@ object ChannelRelay {
         parentPaymentId_opt = Some(relayId), // for a channel relay, parent payment id = relay id
         paymentHash_opt = Some(r.add.paymentHash),
         nodeAlias_opt = Some(nodeParams.alias))) {
-        reputationRecorder ! AttemptRelay(originNode, r.add.endorsement, relayId, r.relayFeeMsat)
-        reputationRecorder ! GetConfidence(context.messageAdapter[ReputationRecorder.Confidence](confidence => WrappedConfidence(confidence.value)), originNode, r.add.endorsement)
+        reputationRecorder ! GetConfidence(context.messageAdapter[ReputationRecorder.Confidence](confidence => WrappedConfidence(confidence.value)), originNode, r.add.endorsement, relayId, r.relayFeeMsat)
         new ChannelRelay(nodeParams, register, reputationRecorder, channels, r, context, relayId, originNode).waitForConfidence()
       }
     }
@@ -113,7 +112,7 @@ object ChannelRelay {
  */
 class ChannelRelay private(nodeParams: NodeParams,
                            register: ActorRef,
-                           reputationRecorder: typed.ActorRef[ReputationRecorder.Command],
+                           reputationRecorder: typed.ActorRef[ReputationRecorder.StandardCommand],
                            channels: Map[ByteVector32, Relayer.OutgoingChannel],
                            r: IncomingPaymentPacket.ChannelRelayPacket,
                            context: ActorContext[ChannelRelay.Command],
@@ -126,7 +125,7 @@ class ChannelRelay private(nodeParams: NodeParams,
   private val forwardFailureAdapter = context.messageAdapter[Register.ForwardFailure[CMD_ADD_HTLC]](WrappedForwardFailure)
   private val addResponseAdapter = context.messageAdapter[CommandResponse[CMD_ADD_HTLC]](WrappedAddResponse)
 
-  private val upstream = Upstream.Hot.Channel(r.add.removeUnknownTlvs(), startedAt)
+  private val upstream = Upstream.Hot.Channel(r.add.removeUnknownTlvs(), startedAt, originNode)
 
   private case class PreviouslyTried(channelId: ByteVector32, failure: RES_ADD_FAILED[ChannelException])
 

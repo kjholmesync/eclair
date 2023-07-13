@@ -59,7 +59,7 @@ class Relayer(nodeParams: NodeParams, router: ActorRef, register: ActorRef, paym
 
   private val postRestartCleaner = context.actorOf(PostRestartHtlcCleaner.props(nodeParams, register, initialized), "post-restart-htlc-cleaner")
   private val channelRelayer = context.spawn(Behaviors.supervise(ChannelRelayer(nodeParams, register, reputationRecorder)).onFailure(SupervisorStrategy.resume), "channel-relayer")
-  private val nodeRelayer = context.spawn(Behaviors.supervise(NodeRelayer(nodeParams, register, NodeRelay.SimpleOutgoingPaymentFactory(nodeParams, router, register), triggerer, router)).onFailure(SupervisorStrategy.resume), name = "node-relayer")
+  private val nodeRelayer = context.spawn(Behaviors.supervise(NodeRelayer(nodeParams, register, reputationRecorder, NodeRelay.SimpleOutgoingPaymentFactory(nodeParams, router, register), triggerer, router)).onFailure(SupervisorStrategy.resume), name = "node-relayer")
 
   def receive: Receive = {
     case init: PostRestartHtlcCleaner.Init => postRestartCleaner forward init
@@ -76,7 +76,7 @@ class Relayer(nodeParams: NodeParams, router: ActorRef, register: ActorRef, paym
             log.warning(s"rejecting htlc #${add.id} from channelId=${add.channelId} reason=trampoline disabled")
             PendingCommandsDb.safeSend(register, nodeParams.db.pendingCommands, add.channelId, CMD_FAIL_HTLC(add.id, Right(RequiredNodeFeatureMissing()), commit = true))
           } else {
-            nodeRelayer ! NodeRelayer.Relay(r)
+            nodeRelayer ! NodeRelayer.Relay(r, originNode)
           }
         case Left(badOnion: BadOnion) =>
           log.warning(s"couldn't parse onion: reason=${badOnion.message}")
