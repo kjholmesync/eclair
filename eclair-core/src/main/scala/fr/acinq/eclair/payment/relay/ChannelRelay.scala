@@ -45,7 +45,6 @@ object ChannelRelay {
 
   // @formatter:off
   sealed trait Command
-  private case object DoRelay extends Command
   private case class WrappedConfidence(confidence: Double) extends Command
   private case class WrappedForwardFailure(failure: Register.ForwardFailure[CMD_ADD_HTLC]) extends Command
   private case class WrappedAddResponse(res: CommandResponse[CMD_ADD_HTLC]) extends Command
@@ -71,7 +70,7 @@ object ChannelRelay {
         paymentHash_opt = Some(r.add.paymentHash),
         nodeAlias_opt = Some(nodeParams.alias))) {
         reputationRecorder ! GetConfidence(context.messageAdapter[ReputationRecorder.Confidence](confidence => WrappedConfidence(confidence.value)), originNode, r.add.endorsement, relayId, r.relayFeeMsat)
-        new ChannelRelay(nodeParams, register, reputationRecorder, channels, r, context, relayId, originNode).waitForConfidence()
+        new ChannelRelay(nodeParams, register, reputationRecorder, channels, r, context, relayId, originNode).relay(Seq.empty)
       }
     }
 
@@ -129,17 +128,9 @@ class ChannelRelay private(nodeParams: NodeParams,
 
   private case class PreviouslyTried(channelId: ByteVector32, failure: RES_ADD_FAILED[ChannelException])
 
-  def waitForConfidence(): Behavior[Command] = {
+  def relay(previousFailures: Seq[PreviouslyTried]): Behavior[Command] = {
     Behaviors.receiveMessagePartial {
       case WrappedConfidence(confidence) =>
-        context.self ! DoRelay
-        relay(Seq.empty, confidence)
-    }
-  }
-
-  def relay(previousFailures: Seq[PreviouslyTried], confidence: Double): Behavior[Command] = {
-    Behaviors.receiveMessagePartial {
-      case DoRelay =>
         if (previousFailures.isEmpty) {
           context.log.info("relaying htlc #{} from channelId={} to requestedShortChannelId={} nextNode={}", r.add.id, r.add.channelId, r.payload.outgoingChannelId, nextNodeId_opt.getOrElse(""))
         }
@@ -169,8 +160,8 @@ class ChannelRelay private(nodeParams: NodeParams,
 
       case WrappedAddResponse(addFailed: RES_ADD_FAILED[_]) =>
         context.log.info("attempt failed with reason={}", addFailed.t.getClass.getSimpleName)
-        context.self ! DoRelay
-        relay(previousFailures :+ PreviouslyTried(selectedChannelId, addFailed), confidence)
+        context.self ! WrappedConfidence(confidence)
+        relay(previousFailures :+ PreviouslyTried(selectedChannelId, addFailed))
 
       case WrappedAddResponse(_: RES_SUCCESS[_]) =>
         context.log.debug("sent htlc to the downstream channel")
@@ -315,7 +306,6 @@ class ChannelRelay private(nodeParams: NodeParams,
    * htlc.
    */
   def relayOrFail(outgoingChannel_opt: Option[OutgoingChannelParams], confidence: Double): RelayResult = {
-    // TODO: compare confidence to slots and liquidity
     outgoingChannel_opt match {
       case None =>
         RelayFailure(CMD_FAIL_HTLC(r.add.id, Right(UnknownNextPeer()), commit = true))
