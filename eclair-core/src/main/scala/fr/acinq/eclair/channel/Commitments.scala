@@ -514,7 +514,7 @@ case class Commitment(fundingTxIndex: Long,
       }
     }
     val occupancy = (outgoingHtlcs.size.toDouble / maxAcceptedHtlcs).max(htlcValueInFlight.toLong.toDouble / allowedHtlcValueInFlight.toLong.toDouble)
-    if (confidence < occupancy) {
+    if (confidence + 0.05 < occupancy) {
       return Left(ConfidenceTooLow(params.channelId, confidence, occupancy))
     }
 
