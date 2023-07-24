@@ -71,7 +71,6 @@ object ReputationRecorder {
           r.updated((originNode, isEndorsed), updatedReputation)
         }
         ReputationRecorder(reputationConfig, updatedReputations)
-
     }
   }
 }

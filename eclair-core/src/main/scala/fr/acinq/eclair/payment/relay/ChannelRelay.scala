@@ -165,13 +165,14 @@ class ChannelRelay private(nodeParams: NodeParams,
 
       case WrappedAddResponse(_: RES_SUCCESS[_]) =>
         context.log.debug("sent htlc to the downstream channel")
-        waitForAddSettled()
+        waitForAddSettled(confidence)
     }
 
-  def waitForAddSettled(): Behavior[Command] =
+  def waitForAddSettled(confidence: Double): Behavior[Command] =
     Behaviors.receiveMessagePartial {
       case WrappedAddResponse(RES_ADD_SETTLED(_, htlc, fulfill: HtlcResult.Fulfill)) =>
         context.log.debug("relaying fulfill to upstream")
+        Metrics.relaySettleFulfill(confidence)
         val cmd = CMD_FULFILL_HTLC(upstream.add.id, fulfill.paymentPreimage, commit = true)
         context.system.eventStream ! EventStream.Publish(ChannelPaymentRelayed(upstream.amountIn, htlc.amountMsat, htlc.paymentHash, upstream.add.channelId, htlc.channelId, startedAt, TimestampMilli.now()))
         recordRelayDuration(isSuccess = true)
@@ -179,6 +180,7 @@ class ChannelRelay private(nodeParams: NodeParams,
 
       case WrappedAddResponse(RES_ADD_SETTLED(_, _, fail: HtlcResult.Fail)) =>
         context.log.debug("relaying fail to upstream")
+        Metrics.relaySettleFail(confidence)
         Metrics.recordPaymentRelayFailed(Tags.FailureType.Remote, Tags.RelayType.Channel)
         val cmd = translateRelayFailure(upstream.add.id, fail)
         recordRelayDuration(isSuccess = false)
