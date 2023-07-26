@@ -615,7 +615,9 @@ object NodeParams extends Logging {
       ),
       localReputationConfig = ReputationConfig(MilliSatoshi(
         config.getLong("local-reputation.max-weight-msat")),
-        FiniteDuration(config.getDuration("local-reputation.min-duration").getSeconds, TimeUnit.SECONDS)),
+        FiniteDuration(config.getDuration("local-reputation.min-duration").getSeconds, TimeUnit.SECONDS),
+        config.getDouble("local-reputation.pending-multiplier")
+      ),
     )
   }
 }

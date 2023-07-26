@@ -231,7 +231,7 @@ object TestConstants {
       ),
       purgeInvoicesInterval = None,
       revokedHtlcInfoCleanerConfig = RevokedHtlcInfoCleaner.Config(10, 100 millis),
-      localReputationConfig = ReputationConfig(1000000 msat, 10 seconds),
+      localReputationConfig = ReputationConfig(1000000 msat, 10 seconds, 100),
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(
@@ -399,7 +399,7 @@ object TestConstants {
       ),
       purgeInvoicesInterval = None,
       revokedHtlcInfoCleanerConfig = RevokedHtlcInfoCleaner.Config(10, 100 millis),
-      localReputationConfig = ReputationConfig(2000000 msat, 20 seconds),
+      localReputationConfig = ReputationConfig(2000000 msat, 20 seconds, 200),
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(

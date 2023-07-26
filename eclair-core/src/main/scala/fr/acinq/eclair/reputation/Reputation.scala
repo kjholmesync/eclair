@@ -22,8 +22,8 @@ import fr.acinq.eclair.{MilliSatoshi, TimestampMilli}
 import java.util.UUID
 import scala.concurrent.duration.FiniteDuration
 
-case class Reputation(pastWeight: Double, pending: Map[UUID, Pending], pastScore: Double, maxWeight: Double, minDuration: FiniteDuration) {
-  private def pendingWeight(now: TimestampMilli): Double = pending.values.map(_.weight(now, minDuration)).sum
+case class Reputation(pastWeight: Double, pending: Map[UUID, Pending], pastScore: Double, maxWeight: Double, minDuration: FiniteDuration, pendingMultiplier: Double) {
+  private def pendingWeight(now: TimestampMilli): Double = pending.values.map(_.weight(now, minDuration, pendingMultiplier)).sum
 
   def confidence(now: TimestampMilli = TimestampMilli.now()): Double = pastScore / (pastWeight + pendingWeight(now))
 
@@ -35,25 +35,25 @@ case class Reputation(pastWeight: Double, pending: Map[UUID, Pending], pastScore
   def record(relayId: UUID, isSuccess: Boolean, feeOverride: Option[MilliSatoshi] = None, now: TimestampMilli = TimestampMilli.now()): Reputation = {
     var p = pending.getOrElse(relayId, Pending(MilliSatoshi(0), now))
     feeOverride.foreach(fee => p = p.copy(fee = fee))
-    val newWeight = pastWeight + p.weight(now, minDuration)
+    val newWeight = pastWeight + p.weight(now, minDuration, 1.0)
     val newScore = if (isSuccess) pastScore + p.fee.toLong.toDouble else pastScore
     if (newWeight > maxWeight) {
-      Reputation(maxWeight, pending - relayId, newScore * maxWeight / newWeight, maxWeight, minDuration)
+      Reputation(maxWeight, pending - relayId, newScore * maxWeight / newWeight, maxWeight, minDuration, pendingMultiplier)
     } else {
-      Reputation(newWeight, pending - relayId, newScore, maxWeight, minDuration)
+      Reputation(newWeight, pending - relayId, newScore, maxWeight, minDuration, pendingMultiplier)
     }
   }
 }
 
 object Reputation {
   case class Pending(fee: MilliSatoshi, startedAt: TimestampMilli) {
-    def weight(now: TimestampMilli, minDuration: FiniteDuration): Double = {
+    def weight(now: TimestampMilli, minDuration: FiniteDuration, pendingMultiplier: Double): Double = {
       val duration = now - startedAt
-      fee.toLong.toDouble * (duration / minDuration).max(1.0)
+      fee.toLong.toDouble * (duration / minDuration).max(pendingMultiplier)
     }
   }
 
-  case class ReputationConfig(maxWeight: MilliSatoshi, minDuration: FiniteDuration)
+  case class ReputationConfig(maxWeight: MilliSatoshi, minDuration: FiniteDuration, pendingMultiplier: Double)
 
-  def init(config: ReputationConfig): Reputation = Reputation(0.0, Map.empty, 0.0, config.maxWeight.toLong.toDouble, config.minDuration)
+  def init(config: ReputationConfig): Reputation = Reputation(0.0, Map.empty, 0.0, config.maxWeight.toLong.toDouble, config.minDuration, config.pendingMultiplier)
 }
