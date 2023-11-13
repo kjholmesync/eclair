@@ -86,7 +86,8 @@ case class NodeParams(nodeKeyManager: NodeKeyManager,
                       blockchainWatchdogThreshold: Int,
                       blockchainWatchdogSources: Seq[String],
                       onionMessageConfig: OnionMessageConfig,
-                      purgeInvoicesInterval: Option[FiniteDuration]) {
+                      purgeInvoicesInterval: Option[FiniteDuration],
+                      liquidityAdsConfig_opt: Option[LiquidityAds.Config]) {
   val privateKey: Crypto.PrivateKey = nodeKeyManager.nodeKey.privateKey
 
   val nodeId: PublicKey = nodeKeyManager.nodeId
@@ -96,6 +97,8 @@ case class NodeParams(nodeKeyManager: NodeKeyManager,
   val pluginMessageTags: Set[Int] = pluginParams.collect { case p: CustomFeaturePlugin => p.messageTags }.toSet.flatten
 
   val pluginOpenChannelInterceptor: Option[InterceptOpenChannelPlugin] = pluginParams.collectFirst { case p: InterceptOpenChannelPlugin => p }
+
+  val liquidityRates_opt: Option[LiquidityAds.LeaseRates] = liquidityAdsConfig_opt.map(_.leaseRates(relayParams.defaultFees(announceChannel = true)))
 
   def currentBlockHeight: BlockHeight = BlockHeight(blockHeight.get)
 
@@ -604,7 +607,16 @@ object NodeParams extends Logging {
         timeout = FiniteDuration(config.getDuration("onion-messages.reply-timeout").getSeconds, TimeUnit.SECONDS),
         maxAttempts = config.getInt("onion-messages.max-attempts"),
       ),
-      purgeInvoicesInterval = purgeInvoicesInterval
+      purgeInvoicesInterval = purgeInvoicesInterval,
+      liquidityAdsConfig_opt = if (config.getBoolean("liquidity-ads.enabled")) {
+        Some(LiquidityAds.Config(
+          feeBase = Satoshi(config.getInt("liquidity-ads.fee-base-satoshis")),
+          feeProportional = config.getInt("liquidity-ads.fee-basis-points"),
+          maxLeaseDuration = config.getInt("liquidity-ads.max-duration-blocks"),
+        ))
+      } else {
+        None
+      },
     )
   }
 }

@@ -23,7 +23,7 @@ import fr.acinq.eclair.payment.relay.Relayer.RelayFees
 import fr.acinq.eclair.transactions.Transactions
 import fr.acinq.eclair.wire.protocol.CommonCodecs.{blockHeight, millisatoshi32, publicKey, satoshi32}
 import fr.acinq.eclair.wire.protocol.TlvCodecs.tmillisatoshi32
-import fr.acinq.eclair.{BlockHeight, CltvExpiryDelta, MilliSatoshi, ToMilliSatoshiConversion}
+import fr.acinq.eclair.{BlockHeight, MilliSatoshi, ToMilliSatoshiConversion}
 import scodec.Codec
 import scodec.bits.ByteVector
 import scodec.codecs._
@@ -41,8 +41,13 @@ import java.nio.charset.StandardCharsets
  */
 object LiquidityAds {
 
-  /** Liquidity leases are valid for a fixed duration, after which they must be renewed. */
-  val LeaseDuration = CltvExpiryDelta(1008) // 1 week
+  case class Config(feeBase: Satoshi, feeProportional: Int, maxLeaseDuration: Int) {
+    def leaseRates(relayFees: RelayFees): LeaseRates = {
+      // We make the remote node pay for one p2wpkh input and one p2wpkh output.
+      // If we need more inputs, we will pay the fees for those additional inputs ourselves.
+      LeaseRates(Transactions.claimP2WPKHOutputWeight, feeProportional, (relayFees.feeProportionalMillionths / 100).toInt, feeBase, relayFees.feeBase)
+    }
+  }
 
   /**
    * Liquidity is leased using the following rates:
@@ -67,12 +72,6 @@ object LiquidityAds {
       // If the seller adds more liquidity than requested, the buyer doesn't pay for that extra liquidity.
       val proportionalFee = requestedAmount.min(contributedAmount).toMilliSatoshi * leaseFeeProportional / 10_000
       leaseFeeBase + (proportionalFee + onChainFees).truncateToSatoshi
-    }
-  }
-
-  object LeaseRates {
-    def apply(fundingWeight: Int, leaseFeeBase: Satoshi, leaseFeeProportional: Int, relayFees: RelayFees): LeaseRates = {
-      LeaseRates(fundingWeight, leaseFeeProportional, (relayFees.feeProportionalMillionths / 100).toInt, leaseFeeBase, relayFees.feeBase)
     }
   }
 

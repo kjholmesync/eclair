@@ -30,7 +30,7 @@ import fr.acinq.eclair.payment.relay.Relayer.{AsyncPaymentsParams, RelayFees, Re
 import fr.acinq.eclair.router.Graph.{MessagePath, WeightRatios}
 import fr.acinq.eclair.router.PathFindingExperimentConf
 import fr.acinq.eclair.router.Router.{MessageRouteParams, MultiPartParams, PathFindingConf, RouterConf, SearchBoundaries}
-import fr.acinq.eclair.wire.protocol.{Color, EncodingType, NodeAddress, OnionRoutingPacket}
+import fr.acinq.eclair.wire.protocol.{Color, EncodingType, LiquidityAds, NodeAddress, OnionRoutingPacket}
 import org.scalatest.Tag
 import scodec.bits.{ByteVector, HexStringSyntax}
 
@@ -51,6 +51,7 @@ object TestConstants {
   val feeratePerKw: FeeratePerKw = FeeratePerKw(10_000 sat)
   val anchorOutputsFeeratePerKw: FeeratePerKw = FeeratePerKw(2_500 sat)
   val emptyOnionPacket: OnionRoutingPacket = OnionRoutingPacket(0, ByteVector.fill(33)(0), ByteVector.fill(1300)(0), ByteVector32.Zeroes)
+  val defaultLiquidityRates: LiquidityAds.LeaseRates = LiquidityAds.LeaseRates(500, 100, 10, 100 sat, 200 msat)
 
   case object TestFeature extends Feature with InitFeature with NodeFeature {
     val rfcName = "test_feature"
@@ -224,7 +225,8 @@ object TestConstants {
         timeout = 200 millis,
         maxAttempts = 2,
       ),
-      purgeInvoicesInterval = None
+      purgeInvoicesInterval = None,
+      liquidityAdsConfig_opt = None,
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(
@@ -389,7 +391,8 @@ object TestConstants {
         timeout = 100 millis,
         maxAttempts = 2,
       ),
-      purgeInvoicesInterval = None
+      purgeInvoicesInterval = None,
+      liquidityAdsConfig_opt = None,
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(
