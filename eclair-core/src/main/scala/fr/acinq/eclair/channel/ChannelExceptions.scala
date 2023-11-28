@@ -16,10 +16,10 @@
 
 package fr.acinq.eclair.channel
 
-import fr.acinq.bitcoin.scalacompat.{BlockHash, ByteVector32, Satoshi, Transaction, TxId}
+import fr.acinq.bitcoin.scalacompat.{BlockHash, ByteVector32, ByteVector64, Satoshi, Transaction, TxId}
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.wire.protocol
-import fr.acinq.eclair.wire.protocol.{AnnouncementSignatures, InteractiveTxMessage, UpdateAddHtlc}
+import fr.acinq.eclair.wire.protocol.{AnnouncementSignatures, InteractiveTxMessage, LiquidityAds, UpdateAddHtlc}
 import fr.acinq.eclair.{BlockHeight, CltvExpiry, CltvExpiryDelta, MilliSatoshi, UInt64}
 import scodec.bits.ByteVector
 
@@ -51,6 +51,9 @@ case class ToSelfDelayTooHigh                      (override val channelId: Byte
 case class ChannelReserveTooHigh                   (override val channelId: ByteVector32, channelReserve: Satoshi, reserveToFundingRatio: Double, maxReserveToFundingRatio: Double) extends ChannelException(channelId, s"channelReserve too high: reserve=$channelReserve fundingRatio=$reserveToFundingRatio maxFundingRatio=$maxReserveToFundingRatio")
 case class ChannelReserveBelowOurDustLimit         (override val channelId: ByteVector32, channelReserve: Satoshi, dustLimit: Satoshi) extends ChannelException(channelId, s"their channelReserve=$channelReserve is below our dustLimit=$dustLimit")
 case class ChannelReserveNotMet                    (override val channelId: ByteVector32, toLocal: MilliSatoshi, toRemote: MilliSatoshi, reserve: Satoshi) extends ChannelException(channelId, s"channel reserve is not met toLocal=$toLocal toRemote=$toRemote reserve=$reserve")
+case class MissingLiquidityAds                     (override val channelId: ByteVector32) extends ChannelException(channelId, "liquidity ads field is missing")
+case class InvalidLiquidityAdsSig                  (override val channelId: ByteVector32) extends ChannelException(channelId, "liquidity ads signature is invalid")
+case class LiquidityRatesRejected                  (override val channelId: ByteVector32) extends ChannelException(channelId, "rejecting liquidity ads proposed rates")
 case class ChannelFundingError                     (override val channelId: ByteVector32) extends ChannelException(channelId, "channel funding error")
 case class InvalidFundingTx                        (override val channelId: ByteVector32) extends ChannelException(channelId, "invalid funding tx")
 case class InvalidSerialId                         (override val channelId: ByteVector32, serialId: UInt64) extends ChannelException(channelId, s"invalid serial_id=${serialId.toByteVector.toHex}")

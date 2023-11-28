@@ -29,8 +29,8 @@ import fr.acinq.eclair.message.OnionMessages.OnionMessageConfig
 import fr.acinq.eclair.payment.relay.Relayer.{AsyncPaymentsParams, RelayFees, RelayParams}
 import fr.acinq.eclair.router.Graph.{MessagePath, WeightRatios}
 import fr.acinq.eclair.router.PathFindingExperimentConf
-import fr.acinq.eclair.router.Router.{MessageRouteParams, MultiPartParams, PathFindingConf, RouterConf, SearchBoundaries}
-import fr.acinq.eclair.wire.protocol.{Color, EncodingType, LiquidityAds, NodeAddress, OnionRoutingPacket}
+import fr.acinq.eclair.router.Router._
+import fr.acinq.eclair.wire.protocol._
 import org.scalatest.Tag
 import scodec.bits.{ByteVector, HexStringSyntax}
 
@@ -226,7 +226,7 @@ object TestConstants {
         maxAttempts = 2,
       ),
       purgeInvoicesInterval = None,
-      liquidityAdsConfig_opt = None,
+      liquidityAdsConfig_opt = Some(LiquidityAds.Config(defaultLiquidityRates.leaseFeeBase, defaultLiquidityRates.leaseFeeProportional, LiquidityAds.DEFAULT_LEASE_DURATION)),
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(
@@ -392,7 +392,7 @@ object TestConstants {
         maxAttempts = 2,
       ),
       purgeInvoicesInterval = None,
-      liquidityAdsConfig_opt = None,
+      liquidityAdsConfig_opt = Some(LiquidityAds.Config(defaultLiquidityRates.leaseFeeBase, defaultLiquidityRates.leaseFeeProportional, LiquidityAds.DEFAULT_LEASE_DURATION)),
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(

@@ -137,8 +137,13 @@ case class TxInitRbf(channelId: ByteVector32,
 }
 
 object TxInitRbf {
-  def apply(channelId: ByteVector32, lockTime: Long, feerate: FeeratePerKw, fundingContribution: Satoshi): TxInitRbf =
-    TxInitRbf(channelId, lockTime, feerate, TlvStream[TxInitRbfTlv](TxRbfTlv.SharedOutputContributionTlv(fundingContribution)))
+  def apply(channelId: ByteVector32, lockTime: Long, feerate: FeeratePerKw, fundingContribution: Satoshi, requestFunding_opt: Option[ChannelTlv.RequestFunds]): TxInitRbf = {
+    val tlvs: Set[TxInitRbfTlv] = Set(
+      Some(TxRbfTlv.SharedOutputContributionTlv(fundingContribution)),
+      requestFunding_opt
+    ).flatten
+    TxInitRbf(channelId, lockTime, feerate, TlvStream(tlvs))
+  }
 }
 
 case class TxAckRbf(channelId: ByteVector32,
@@ -148,8 +153,13 @@ case class TxAckRbf(channelId: ByteVector32,
 }
 
 object TxAckRbf {
-  def apply(channelId: ByteVector32, fundingContribution: Satoshi): TxAckRbf =
-    TxAckRbf(channelId, TlvStream[TxAckRbfTlv](TxRbfTlv.SharedOutputContributionTlv(fundingContribution)))
+  def apply(channelId: ByteVector32, fundingContribution: Satoshi, addFunding_opt: Option[ChannelTlv.WillFund]): TxAckRbf = {
+    val tlvs: Set[TxAckRbfTlv] = Set(
+      Some(TxRbfTlv.SharedOutputContributionTlv(fundingContribution)),
+      addFunding_opt,
+    ).flatten
+    TxAckRbf(channelId, TlvStream(tlvs))
+  }
 }
 
 case class TxAbort(channelId: ByteVector32,
@@ -295,10 +305,11 @@ case class SpliceInit(channelId: ByteVector32,
 }
 
 object SpliceInit {
-  def apply(channelId: ByteVector32, fundingContribution: Satoshi, lockTime: Long, feerate: FeeratePerKw, fundingPubKey: PublicKey, pushAmount: MilliSatoshi, requireConfirmedInputs: Boolean): SpliceInit = {
+  def apply(channelId: ByteVector32, fundingContribution: Satoshi, lockTime: Long, feerate: FeeratePerKw, fundingPubKey: PublicKey, pushAmount: MilliSatoshi, requestFunding_opt: Option[ChannelTlv.RequestFunds], requireConfirmedInputs: Boolean): SpliceInit = {
     val tlvs: Set[SpliceInitTlv] = Set(
       Some(ChannelTlv.PushAmountTlv(pushAmount)),
       if (requireConfirmedInputs) Some(ChannelTlv.RequireConfirmedInputsTlv()) else None,
+      requestFunding_opt,
     ).flatten
     SpliceInit(channelId, fundingContribution, feerate, lockTime, fundingPubKey, TlvStream(tlvs))
   }
@@ -314,10 +325,11 @@ case class SpliceAck(channelId: ByteVector32,
 }
 
 object SpliceAck {
-  def apply(channelId: ByteVector32, fundingContribution: Satoshi, fundingPubKey: PublicKey, pushAmount: MilliSatoshi, requireConfirmedInputs: Boolean): SpliceAck = {
+  def apply(channelId: ByteVector32, fundingContribution: Satoshi, fundingPubKey: PublicKey, pushAmount: MilliSatoshi, addFunding_opt: Option[ChannelTlv.WillFund], requireConfirmedInputs: Boolean): SpliceAck = {
     val tlvs: Set[SpliceAckTlv] = Set(
       Some(ChannelTlv.PushAmountTlv(pushAmount)),
       if (requireConfirmedInputs) Some(ChannelTlv.RequireConfirmedInputsTlv()) else None,
+      addFunding_opt,
     ).flatten
     SpliceAck(channelId, fundingContribution, fundingPubKey, TlvStream(tlvs))
   }
