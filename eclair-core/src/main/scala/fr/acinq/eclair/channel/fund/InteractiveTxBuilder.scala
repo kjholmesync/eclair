@@ -16,6 +16,8 @@
 
 package fr.acinq.eclair.channel.fund
 
+import akka.actor.typed.eventstream.EventStream
+import akka.actor.typed.scaladsl.adapter.TypedActorRefOps
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, StashBuffer}
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.event.LoggingAdapter
@@ -778,6 +780,7 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
     Behaviors.receiveMessagePartial {
       case SignTransactionResult(signedTx) =>
         log.info(s"interactive-tx txid=${signedTx.txId} partially signed with {} local inputs, {} remote inputs, {} local outputs and {} remote outputs", signedTx.tx.localInputs.length, signedTx.tx.remoteInputs.length, signedTx.tx.localOutputs.length, signedTx.tx.remoteOutputs.length)
+        liquidityPurchased_opt.foreach(purchase => context.system.eventStream ! EventStream.Publish(LiquidityPurchased(replyTo.toClassic, channelParams.channelId, remoteNodeId, signedTx.txId, purchase)))
         replyTo ! Succeeded(InteractiveTxSigningSession.WaitingForSigs(fundingParams, purpose.fundingTxIndex, signedTx, Left(localCommit), remoteCommit), commitSig)
         Behaviors.stopped
       case WalletFailure(t) =>

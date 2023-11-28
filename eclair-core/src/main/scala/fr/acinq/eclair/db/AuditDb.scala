@@ -18,11 +18,12 @@ package fr.acinq.eclair.db
 
 import fr.acinq.bitcoin.scalacompat.Crypto.PublicKey
 import fr.acinq.bitcoin.scalacompat.{ByteVector32, Satoshi}
-import fr.acinq.eclair.{Paginated, TimestampMilli}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.AuditDb.{NetworkFee, Stats}
 import fr.acinq.eclair.db.DbEventHandler.ChannelEvent
 import fr.acinq.eclair.payment.{PathFindingExperimentMetrics, PaymentReceived, PaymentRelayed, PaymentSent}
+import fr.acinq.eclair.wire.protocol.LiquidityAds
+import fr.acinq.eclair.{Paginated, TimestampMilli}
 
 trait AuditDb {
 
@@ -33,6 +34,8 @@ trait AuditDb {
   def add(paymentReceived: PaymentReceived): Unit
 
   def add(paymentRelayed: PaymentRelayed): Unit
+
+  def add(liquidityPurchase: LiquidityPurchased): Unit
 
   def add(txPublished: TransactionPublished): Unit
 
@@ -49,6 +52,8 @@ trait AuditDb {
   def listReceived(from: TimestampMilli, to: TimestampMilli, paginated_opt: Option[Paginated] = None): Seq[PaymentReceived]
 
   def listRelayed(from: TimestampMilli, to: TimestampMilli, paginated_opt: Option[Paginated] = None): Seq[PaymentRelayed]
+
+  def listLiquidityPurchases(remoteNodeId: PublicKey): Seq[LiquidityAds.LiquidityPurchased]
 
   def listNetworkFees(from: TimestampMilli, to: TimestampMilli): Seq[NetworkFee]
 

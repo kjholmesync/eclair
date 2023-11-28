@@ -386,12 +386,20 @@ class WaitForDualFundingConfirmedStateSpec extends TestKitBaseClass with Fixture
     val balanceBob1 = bob.stateData.asInstanceOf[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED].commitments.latest.localCommit.spec.toLocal
     assert(alice.stateData.asInstanceOf[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED].previousFundingTxs.isEmpty)
 
+    val eventListener = TestProbe()
+    systemA.eventStream.subscribe(eventListener.ref, classOf[LiquidityPurchased])
+
     val feerate2 = FeeratePerKw(12_500 sat)
-    testBumpFundingFees(f, Some(feerate2), Some(LiquidityAds.RequestRemoteFunding(remoteFunding, 20_000 sat, alice.underlyingActor.nodeParams.currentBlockHeight, 2016)))
+    val rbfTx = testBumpFundingFees(f, Some(feerate2), Some(LiquidityAds.RequestRemoteFunding(remoteFunding, 20_000 sat, alice.underlyingActor.nodeParams.currentBlockHeight, 2016)))
     val liquidityFee2 = bob.underlyingActor.nodeParams.liquidityRates_opt.get.fees(feerate2, remoteFunding, remoteFunding)
     val balanceBob2 = bob.stateData.asInstanceOf[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED].commitments.latest.localCommit.spec.toLocal
     assert(liquidityFee1 < liquidityFee2)
     assert(balanceBob1 + liquidityFee2 - liquidityFee1 == balanceBob2)
+    val event = eventListener.expectMsgType[LiquidityPurchased]
+    assert(event.fundingTxId == rbfTx.txId)
+    assert(event.purchase.isBuyer)
+    assert(event.purchase.lease.amount == remoteFunding)
+    assert(event.purchase.lease.fees == liquidityFee2)
 
     // The second RBF attempt removes the liquidity request.
     val feerate3 = FeeratePerKw(15_000 sat)

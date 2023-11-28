@@ -299,6 +299,11 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   test("recv CMD_SPLICE (splice-in, liquidity ads)", Tag(ChannelStateTestsTags.Quiescence)) { f =>
     import f._
 
+    val eventListenerA = TestProbe()
+    systemA.eventStream.subscribe(eventListenerA.ref, classOf[LiquidityPurchased])
+    val eventListenerB = TestProbe()
+    systemB.eventStream.subscribe(eventListenerB.ref, classOf[LiquidityPurchased])
+
     val sender = TestProbe()
     val fundingRequest = LiquidityAds.RequestRemoteFunding(400_000 sat, 10_000 sat, alice.nodeParams.currentBlockHeight, 2016)
     val cmd = CMD_SPLICE(sender.ref, Some(SpliceIn(500_000 sat)), None, Some(fundingRequest))
@@ -327,12 +332,21 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     bob2alice.forward(alice)
     alice2bob.expectMsgType[TxComplete]
     alice2bob.forward(bob)
-    exchangeSpliceSigs(alice, bob, alice2bob, bob2alice, sender)
+    val spliceTx = exchangeSpliceSigs(alice, bob, alice2bob, bob2alice, sender)
 
     // Alice paid fees to Bob for the additional liquidity.
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.capacity == 2_400_000.sat)
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toLocal < 1_300_000_000.msat)
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toRemote > 1_100_000_000.msat)
+
+    val eventA = eventListenerA.expectMsgType[LiquidityPurchased]
+    assert(eventA.fundingTxId == spliceTx.txid)
+    assert(eventA.purchase.isBuyer)
+    assert(eventA.purchase.lease.amount == fundingRequest.fundingAmount)
+    assert(eventA.purchase.lease.fees > 0.sat)
+    val eventB = eventListenerB.expectMsgType[LiquidityPurchased]
+    assert(!eventB.purchase.isBuyer)
+    assert(eventB.purchase.copy(isBuyer = true) == eventA.purchase)
   }
 
   test("recv CMD_SPLICE (splice-in, liquidity ads, fee too high)", Tag(ChannelStateTestsTags.Quiescence)) { f =>

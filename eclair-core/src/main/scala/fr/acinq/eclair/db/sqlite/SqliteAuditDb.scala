@@ -17,7 +17,7 @@
 package fr.acinq.eclair.db.sqlite
 
 import fr.acinq.bitcoin.scalacompat.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.scalacompat.{ByteVector32, Satoshi, SatoshiLong}
+import fr.acinq.bitcoin.scalacompat.{ByteVector32, ByteVector64, Satoshi, SatoshiLong}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.AuditDb.{NetworkFee, Stats}
 import fr.acinq.eclair.db.DbEventHandler.ChannelEvent
@@ -26,6 +26,7 @@ import fr.acinq.eclair.db.Monitoring.Tags.DbBackends
 import fr.acinq.eclair.db._
 import fr.acinq.eclair.payment._
 import fr.acinq.eclair.transactions.Transactions.PlaceHolderPubKey
+import fr.acinq.eclair.wire.protocol.LiquidityAds
 import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, Paginated, TimestampMilli}
 import grizzled.slf4j.Logging
 
@@ -34,7 +35,7 @@ import java.util.UUID
 
 object SqliteAuditDb {
   val DB_NAME = "audit"
-  val CURRENT_VERSION = 8
+  val CURRENT_VERSION = 9
 }
 
 class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
@@ -110,6 +111,11 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
       statement.executeUpdate("DROP TABLE network_fees")
     }
 
+    def migration89(statement: Statement): Unit = {
+      statement.executeUpdate("CREATE TABLE liquidity_purchases (tx_id BLOB NOT NULL, channel_id BLOB NOT NULL, node_id BLOB NOT NULL, confirmed BOOLEAN NOT NULL, is_buyer BOOLEAN NOT NULL, amount_sat INTEGER NOT NULL, fee_sat INTEGER NOT NULL, seller_sig BLOB NOT NULL, witness BLOB NOT NULL, timestamp INTEGER NOT NULL)")
+      statement.executeUpdate("CREATE INDEX liquidity_purchases_node_id_idx ON liquidity_purchases(node_id)")
+    }
+
     getVersion(statement, DB_NAME) match {
       case None =>
         statement.executeUpdate("CREATE TABLE sent (amount_msat INTEGER NOT NULL, fees_msat INTEGER NOT NULL, recipient_amount_msat INTEGER NOT NULL, payment_id TEXT NOT NULL, parent_payment_id TEXT NOT NULL, payment_hash BLOB NOT NULL, payment_preimage BLOB NOT NULL, recipient_node_id BLOB NOT NULL, to_channel_id BLOB NOT NULL, timestamp INTEGER NOT NULL)")
@@ -120,6 +126,7 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
         statement.executeUpdate("CREATE TABLE channel_errors (channel_id BLOB NOT NULL, node_id BLOB NOT NULL, error_name TEXT NOT NULL, error_message TEXT NOT NULL, is_fatal INTEGER NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE channel_updates (channel_id BLOB NOT NULL, node_id BLOB NOT NULL, fee_base_msat INTEGER NOT NULL, fee_proportional_millionths INTEGER NOT NULL, cltv_expiry_delta INTEGER NOT NULL, htlc_minimum_msat INTEGER NOT NULL, htlc_maximum_msat INTEGER NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE path_finding_metrics (amount_msat INTEGER NOT NULL, fees_msat INTEGER NOT NULL, status TEXT NOT NULL, duration_ms INTEGER NOT NULL, timestamp INTEGER NOT NULL, is_mpp INTEGER NOT NULL, experiment_name TEXT NOT NULL, recipient_node_id BLOB NOT NULL)")
+        statement.executeUpdate("CREATE TABLE liquidity_purchases (tx_id BLOB NOT NULL, channel_id BLOB NOT NULL, node_id BLOB NOT NULL, confirmed BOOLEAN NOT NULL, is_buyer BOOLEAN NOT NULL, amount_sat INTEGER NOT NULL, fee_sat INTEGER NOT NULL, seller_sig BLOB NOT NULL, witness BLOB NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE transactions_published (tx_id BLOB NOT NULL PRIMARY KEY, channel_id BLOB NOT NULL, node_id BLOB NOT NULL, mining_fee_sat INTEGER NOT NULL, tx_type TEXT NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE transactions_confirmed (tx_id BLOB NOT NULL PRIMARY KEY, channel_id BLOB NOT NULL, node_id BLOB NOT NULL, timestamp INTEGER NOT NULL)")
 
@@ -138,9 +145,10 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
         statement.executeUpdate("CREATE INDEX metrics_timestamp_idx ON path_finding_metrics(timestamp)")
         statement.executeUpdate("CREATE INDEX metrics_mpp_idx ON path_finding_metrics(is_mpp)")
         statement.executeUpdate("CREATE INDEX metrics_name_idx ON path_finding_metrics(experiment_name)")
+        statement.executeUpdate("CREATE INDEX liquidity_purchases_node_id_idx ON liquidity_purchases(node_id)")
         statement.executeUpdate("CREATE INDEX transactions_published_timestamp_idx ON transactions_published(timestamp)")
         statement.executeUpdate("CREATE INDEX transactions_confirmed_timestamp_idx ON transactions_confirmed(timestamp)")
-      case Some(v@(1 | 2 | 3 | 4 | 5 | 6 | 7)) =>
+      case Some(v@(1 | 2 | 3 | 4 | 5 | 6 | 7 | 8)) =>
         logger.warn(s"migrating db $DB_NAME, found version=$v current=$CURRENT_VERSION")
         if (v < 2) {
           migration12(statement)
@@ -162,6 +170,9 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
         }
         if (v < 8) {
           migration78(statement)
+        }
+        if (v < 9) {
+          migration89(statement)
         }
       case Some(CURRENT_VERSION) => () // table is up-to-date, nothing to do
       case Some(unknownVersion) => throw new RuntimeException(s"Unknown version of DB $DB_NAME found, version=$unknownVersion")
@@ -244,6 +255,22 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
     }
   }
 
+  override def add(e: LiquidityPurchased): Unit = withMetrics("audit/add-liquidity-purchase", DbBackends.Sqlite) {
+    using(sqlite.prepareStatement("INSERT INTO liquidity_purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) { statement =>
+      statement.setBytes(1, e.fundingTxId.value.toArray)
+      statement.setBytes(2, e.channelId.toArray)
+      statement.setBytes(3, e.remoteNodeId.value.toArray)
+      statement.setBoolean(4, false) // transaction isn't confirmed yet, we just published it
+      statement.setBoolean(5, e.purchase.isBuyer)
+      statement.setLong(6, e.purchase.lease.amount.toLong)
+      statement.setLong(7, e.purchase.lease.fees.toLong)
+      statement.setBytes(8, e.purchase.lease.sellerSig.toArray)
+      statement.setBytes(9, LiquidityAds.leaseWitnessCodec.encode(e.purchase.lease.witness).require.bytes.toArray)
+      statement.setLong(10, TimestampMilli.now().toLong)
+      statement.executeUpdate()
+    }
+  }
+
   override def add(e: TransactionPublished): Unit = withMetrics("audit/add-transaction-published", DbBackends.Sqlite) {
     using(sqlite.prepareStatement("INSERT OR IGNORE INTO transactions_published VALUES (?, ?, ?, ?, ?, ?)")) { statement =>
       statement.setBytes(1, e.tx.txid.value.toArray)
@@ -262,6 +289,12 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
       statement.setBytes(2, e.channelId.toArray)
       statement.setBytes(3, e.remoteNodeId.value.toArray)
       statement.setLong(4, TimestampMilli.now().toLong)
+      statement.executeUpdate()
+    }
+    using(sqlite.prepareStatement("UPDATE liquidity_purchases SET confirmed=? WHERE node_id=? AND tx_id=?")) { statement =>
+      statement.setBoolean(1, true)
+      statement.setBytes(2, e.remoteNodeId.value.toArray)
+      statement.setBytes(3, e.tx.txid.value.toArray)
       statement.executeUpdate()
     }
   }
@@ -412,6 +445,24 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
     paginated_opt match {
       case Some(paginated) => result.slice(paginated.skip, paginated.skip + paginated.count)
       case None => result
+    }
+  }
+
+  override def listLiquidityPurchases(remoteNodeId: PublicKey): Seq[LiquidityAds.LiquidityPurchased] = {
+    using(sqlite.prepareStatement("SELECT * FROM liquidity_purchases WHERE confirmed=? AND node_id=?")) { statement =>
+      statement.setBoolean(1, true)
+      statement.setBytes(2, remoteNodeId.value.toArray)
+      statement.executeQuery().map { rs =>
+        LiquidityAds.LiquidityPurchased(
+          isBuyer = rs.getBoolean("is_buyer"),
+          lease = LiquidityAds.Lease(
+            amount = Satoshi(rs.getLong("amount_sat")),
+            fees = Satoshi(rs.getLong("fee_sat")),
+            sellerSig = ByteVector64(rs.getByteVector("seller_sig")),
+            witness = LiquidityAds.leaseWitnessCodec.decode(rs.getByteVector("witness").bits).require.value,
+          )
+        )
+      }.toSeq
     }
   }
 

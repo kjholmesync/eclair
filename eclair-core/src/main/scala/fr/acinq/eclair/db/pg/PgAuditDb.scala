@@ -17,7 +17,7 @@
 package fr.acinq.eclair.db.pg
 
 import fr.acinq.bitcoin.scalacompat.Crypto.PublicKey
-import fr.acinq.bitcoin.scalacompat.{ByteVector32, Satoshi, SatoshiLong}
+import fr.acinq.bitcoin.scalacompat.{ByteVector32, ByteVector64, Satoshi, SatoshiLong}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.AuditDb.{NetworkFee, Stats}
 import fr.acinq.eclair.db.DbEventHandler.ChannelEvent
@@ -26,6 +26,7 @@ import fr.acinq.eclair.db.Monitoring.Tags.DbBackends
 import fr.acinq.eclair.db._
 import fr.acinq.eclair.payment._
 import fr.acinq.eclair.transactions.Transactions.PlaceHolderPubKey
+import fr.acinq.eclair.wire.protocol.LiquidityAds
 import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, Paginated, TimestampMilli}
 import grizzled.slf4j.Logging
 
@@ -36,7 +37,7 @@ import javax.sql.DataSource
 
 object PgAuditDb {
   val DB_NAME = "audit"
-  val CURRENT_VERSION = 11
+  val CURRENT_VERSION = 12
 }
 
 class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
@@ -110,6 +111,11 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
         statement.executeUpdate("CREATE INDEX metrics_recipient_idx ON audit.path_finding_metrics(recipient_node_id)")
       }
 
+      def migration1112(statement: Statement): Unit = {
+        statement.executeUpdate("CREATE TABLE audit.liquidity_purchases (tx_id TEXT NOT NULL, channel_id TEXT NOT NULL, node_id TEXT NOT NULL, confirmed BOOLEAN NOT NULL, is_buyer BOOLEAN NOT NULL, amount_sat BIGINT NOT NULL, fee_sat BIGINT NOT NULL, seller_sig TEXT NOT NULL, witness TEXT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL)")
+        statement.executeUpdate("CREATE INDEX liquidity_purchases_node_id_idx ON audit.liquidity_purchases(node_id)")
+      }
+
       getVersion(statement, DB_NAME) match {
         case None =>
           statement.executeUpdate("CREATE SCHEMA audit")
@@ -121,6 +127,7 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
           statement.executeUpdate("CREATE TABLE audit.channel_events (channel_id TEXT NOT NULL, node_id TEXT NOT NULL, capacity_sat BIGINT NOT NULL, is_funder BOOLEAN NOT NULL, is_private BOOLEAN NOT NULL, event TEXT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL)")
           statement.executeUpdate("CREATE TABLE audit.channel_updates (channel_id TEXT NOT NULL, node_id TEXT NOT NULL, fee_base_msat BIGINT NOT NULL, fee_proportional_millionths BIGINT NOT NULL, cltv_expiry_delta BIGINT NOT NULL, htlc_minimum_msat BIGINT NOT NULL, htlc_maximum_msat BIGINT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL)")
           statement.executeUpdate("CREATE TABLE audit.path_finding_metrics (amount_msat BIGINT NOT NULL, fees_msat BIGINT NOT NULL, status TEXT NOT NULL, duration_ms BIGINT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL, is_mpp BOOLEAN NOT NULL, experiment_name TEXT NOT NULL, recipient_node_id TEXT NOT NULL, payment_hash TEXT, routing_hints JSONB)")
+          statement.executeUpdate("CREATE TABLE audit.liquidity_purchases (tx_id TEXT NOT NULL, channel_id TEXT NOT NULL, node_id TEXT NOT NULL, confirmed BOOLEAN NOT NULL, is_buyer BOOLEAN NOT NULL, amount_sat BIGINT NOT NULL, fee_sat BIGINT NOT NULL, seller_sig TEXT NOT NULL, witness TEXT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL)")
           statement.executeUpdate("CREATE TABLE audit.transactions_published (tx_id TEXT NOT NULL PRIMARY KEY, channel_id TEXT NOT NULL, node_id TEXT NOT NULL, mining_fee_sat BIGINT NOT NULL, tx_type TEXT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL)")
           statement.executeUpdate("CREATE TABLE audit.transactions_confirmed (tx_id TEXT NOT NULL PRIMARY KEY, channel_id TEXT NOT NULL, node_id TEXT NOT NULL, timestamp TIMESTAMP WITH TIME ZONE NOT NULL)")
 
@@ -142,9 +149,10 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
           statement.executeUpdate("CREATE INDEX metrics_name_idx ON audit.path_finding_metrics(experiment_name)")
           statement.executeUpdate("CREATE INDEX metrics_recipient_idx ON audit.path_finding_metrics(recipient_node_id)")
           statement.executeUpdate("CREATE INDEX metrics_hash_idx ON audit.path_finding_metrics(payment_hash)")
+          statement.executeUpdate("CREATE INDEX liquidity_purchases_node_id_idx ON audit.liquidity_purchases(node_id)")
           statement.executeUpdate("CREATE INDEX transactions_published_timestamp_idx ON audit.transactions_published(timestamp)")
           statement.executeUpdate("CREATE INDEX transactions_confirmed_timestamp_idx ON audit.transactions_confirmed(timestamp)")
-        case Some(v@(4 | 5 | 6 | 7 | 8 | 9 | 10)) =>
+        case Some(v@(4 | 5 | 6 | 7 | 8 | 9 | 10 | 11)) =>
           logger.warn(s"migrating db $DB_NAME, found version=$v current=$CURRENT_VERSION")
           if (v < 5) {
             migration45(statement)
@@ -166,6 +174,9 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
           }
           if (v < 11) {
             migration1011(statement)
+          }
+          if (v < 12) {
+            migration1112(statement)
           }
         case Some(CURRENT_VERSION) => () // table is up-to-date, nothing to do
         case Some(unknownVersion) => throw new RuntimeException(s"Unknown version of DB $DB_NAME found, version=$unknownVersion")
@@ -256,6 +267,24 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
     }
   }
 
+  override def add(e: LiquidityPurchased): Unit = withMetrics("audit/add-liquidity-purchase", DbBackends.Postgres) {
+    inTransaction { pg =>
+      using(pg.prepareStatement("INSERT INTO audit.liquidity_purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) { statement =>
+        statement.setString(1, e.fundingTxId.value.toHex)
+        statement.setString(2, e.channelId.toHex)
+        statement.setString(3, e.remoteNodeId.toHex)
+        statement.setBoolean(4, false) // transaction isn't confirmed yet, we just published it
+        statement.setBoolean(5, e.purchase.isBuyer)
+        statement.setLong(6, e.purchase.lease.amount.toLong)
+        statement.setLong(7, e.purchase.lease.fees.toLong)
+        statement.setString(8, e.purchase.lease.sellerSig.toHex)
+        statement.setString(9, LiquidityAds.leaseWitnessCodec.encode(e.purchase.lease.witness).require.bytes.toHex)
+        statement.setTimestamp(10, Timestamp.from(Instant.now()))
+        statement.executeUpdate()
+      }
+    }
+  }
+
   override def add(e: TransactionPublished): Unit = withMetrics("audit/add-transaction-published", DbBackends.Postgres) {
     inTransaction { pg =>
       using(pg.prepareStatement("INSERT INTO audit.transactions_published VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")) { statement =>
@@ -277,6 +306,12 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
         statement.setString(2, e.channelId.toHex)
         statement.setString(3, e.remoteNodeId.value.toHex)
         statement.setTimestamp(4, Timestamp.from(Instant.now()))
+        statement.executeUpdate()
+      }
+      using(pg.prepareStatement("UPDATE audit.liquidity_purchases SET confirmed=? WHERE node_id=? AND tx_id=?")) { statement =>
+        statement.setBoolean(1, true)
+        statement.setString(2, e.remoteNodeId.toHex)
+        statement.setString(3, e.tx.txid.value.toHex)
         statement.executeUpdate()
       }
     }
@@ -442,6 +477,26 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
         case None => result
       }
     }
+
+  override def listLiquidityPurchases(remoteNodeId: PublicKey): Seq[LiquidityAds.LiquidityPurchased] = {
+    inTransaction { pg =>
+      using(pg.prepareStatement("SELECT * FROM audit.liquidity_purchases WHERE confirmed=? AND node_id=?")) { statement =>
+        statement.setBoolean(1, true)
+        statement.setString(2, remoteNodeId.toHex)
+        statement.executeQuery().map { rs =>
+          LiquidityAds.LiquidityPurchased(
+            isBuyer = rs.getBoolean("is_buyer"),
+            lease = LiquidityAds.Lease(
+              amount = Satoshi(rs.getLong("amount_sat")),
+              fees = Satoshi(rs.getLong("fee_sat")),
+              sellerSig = ByteVector64.fromValidHex(rs.getString("seller_sig")),
+              witness = LiquidityAds.leaseWitnessCodec.decode(rs.getByteVectorFromHex("witness").bits).require.value,
+            )
+          )
+        }.toSeq
+      }
+    }
+  }
 
   override def listNetworkFees(from: TimestampMilli, to: TimestampMilli): Seq[NetworkFee] =
     inTransaction { pg =>

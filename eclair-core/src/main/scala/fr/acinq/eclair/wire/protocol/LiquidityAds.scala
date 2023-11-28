@@ -191,7 +191,7 @@ object LiquidityAds {
     }
   }
 
-  private val leaseWitnessCodec: Codec[LeaseWitness] = (
+  val leaseWitnessCodec: Codec[LeaseWitness] = (
     ("tag" | constant(ByteVector("option_will_fund".getBytes(StandardCharsets.US_ASCII)))) ::
       ("funding_pubkey" | publicKey) ::
       ("lease_end" | blockHeight) ::
