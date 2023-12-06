@@ -16,14 +16,14 @@
 
 package fr.acinq.eclair.router
 
+import fr.acinq.bitcoin.scalacompat.Block
 import fr.acinq.bitcoin.scalacompat.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.scalacompat.{Block, SatoshiLong}
 import fr.acinq.eclair.TestConstants.Alice
-import fr.acinq.eclair.{RealShortChannelId, _}
 import fr.acinq.eclair.router.Announcements._
 import fr.acinq.eclair.wire.protocol.ChannelUpdate.ChannelFlags
 import fr.acinq.eclair.wire.protocol.LightningMessageCodecs.nodeAnnouncementCodec
-import fr.acinq.eclair.wire.protocol.{LiquidityAds, NodeAddress, TlvStream}
+import fr.acinq.eclair.wire.protocol.{NodeAddress, TlvStream}
+import fr.acinq.eclair.{RealShortChannelId, _}
 import org.scalatest.funsuite.AnyFunSuite
 import scodec.bits._
 
@@ -64,7 +64,7 @@ class AnnouncementsSpec extends AnyFunSuite {
       Features.BasicMultiPartPayment -> FeatureSupport.Optional,
       Features.PaymentMetadata -> FeatureSupport.Optional,
     )
-    val ann = makeNodeAnnouncement(Alice.nodeParams.privateKey, Alice.nodeParams.alias, Alice.nodeParams.color, Alice.nodeParams.publicAddresses, features.nodeAnnouncementFeatures(), Some(TestConstants.defaultLiquidityRates))
+    val ann = makeNodeAnnouncement(Alice.nodeParams.privateKey, Alice.nodeParams.alias, Alice.nodeParams.color, Alice.nodeParams.publicAddresses, features.nodeAnnouncementFeatures(), Some(TestConstants.defaultLiquidityRates :: Nil))
     // Features should be filtered to only include node_announcement related features.
     assert(ann.features == Features(
       Features.DataLossProtect -> FeatureSupport.Optional,

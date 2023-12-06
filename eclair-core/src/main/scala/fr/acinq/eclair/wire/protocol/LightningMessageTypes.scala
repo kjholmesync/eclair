@@ -58,6 +58,7 @@ sealed trait HtlcFailureMessage extends HtlcSettlementMessage // <- not in the s
 case class Init(features: Features[InitFeature], tlvStream: TlvStream[InitTlv] = TlvStream.empty) extends SetupMessage {
   val networks = tlvStream.get[InitTlv.Networks].map(_.chainHashes).getOrElse(Nil)
   val remoteAddress_opt = tlvStream.get[InitTlv.RemoteAddress].map(_.address)
+  val liquidityRates: Seq[LiquidityAds.LeaseRate] = tlvStream.get[InitTlv.LiquidityAdsRates].map(_.leaseRates).getOrElse(Nil)
 }
 
 case class Warning(channelId: ByteVector32, data: ByteVector, tlvStream: TlvStream[WarningTlv] = TlvStream.empty) extends SetupMessage with HasChannelId {
@@ -490,20 +491,17 @@ case class NodeAnnouncement(signature: ByteVector64,
                             alias: String,
                             addresses: List[NodeAddress],
                             tlvStream: TlvStream[NodeAnnouncementTlv] = TlvStream.empty) extends RoutingMessage with AnnouncementMessage with HasTimestamp {
-
-  val liquidityRates_opt: Option[LiquidityAds.LeaseRates] = tlvStream.get[NodeAnnouncementTlv.LiquidityAdsTlv].map(_.leaseRates)
-
   val validAddresses: List[NodeAddress] = {
     // if port is equal to 0, SHOULD ignore ipv6_addr OR ipv4_addr OR hostname; SHOULD ignore Tor v2 onion services.
     val validAddresses = addresses.filter(address => address.port != 0 || address.isInstanceOf[Tor3]).filterNot(address => address.isInstanceOf[Tor2])
     // if more than one type 5 address is announced, SHOULD ignore the additional data.
     validAddresses.filter(!_.isInstanceOf[DnsHostname]) ++ validAddresses.find(_.isInstanceOf[DnsHostname])
   }
-
   val shouldRebroadcast: Boolean = {
     // if more than one type 5 address is announced, MUST not forward the node_announcement.
     addresses.count(address => address.isInstanceOf[DnsHostname]) <= 1
   }
+  val liquidityRates: Seq[LiquidityAds.LeaseRate] = tlvStream.get[NodeAnnouncementTlv.LiquidityAdsRates].map(_.leaseRates).getOrElse(Nil)
 }
 
 case class ChannelUpdate(signature: ByteVector64,

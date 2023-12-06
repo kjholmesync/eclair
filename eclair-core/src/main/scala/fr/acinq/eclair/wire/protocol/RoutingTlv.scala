@@ -36,9 +36,10 @@ sealed trait NodeAnnouncementTlv extends Tlv
 
 object NodeAnnouncementTlv {
 
-  case class LiquidityAdsTlv(leaseRates: LiquidityAds.LeaseRates) extends NodeAnnouncementTlv
+  /** Rates at which we sell inbound liquidity to remote peers. */
+  case class LiquidityAdsRates(leaseRates: List[LiquidityAds.LeaseRate]) extends NodeAnnouncementTlv
 
-  private val liquidityAdsCodec: Codec[LiquidityAdsTlv] = tlvField(LiquidityAds.leaseRatesCodec)
+  private val liquidityAdsCodec: Codec[LiquidityAdsRates] = tlvField(list(LiquidityAds.LeaseRate.codec))
 
   val nodeAnnouncementTlvCodec: Codec[TlvStream[NodeAnnouncementTlv]] = tlvStream(discriminated[NodeAnnouncementTlv].by(varint)
     .typecase(UInt64(1337), liquidityAdsCodec)

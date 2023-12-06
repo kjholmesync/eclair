@@ -16,10 +16,10 @@
 
 package fr.acinq.eclair.channel
 
-import fr.acinq.bitcoin.scalacompat.{BlockHash, ByteVector32, ByteVector64, Satoshi, Transaction, TxId}
+import fr.acinq.bitcoin.scalacompat.{BlockHash, ByteVector32, Satoshi, Transaction, TxId}
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.wire.protocol
-import fr.acinq.eclair.wire.protocol.{AnnouncementSignatures, InteractiveTxMessage, LiquidityAds, UpdateAddHtlc}
+import fr.acinq.eclair.wire.protocol.{AnnouncementSignatures, InteractiveTxMessage, UpdateAddHtlc}
 import fr.acinq.eclair.{BlockHeight, CltvExpiry, CltvExpiryDelta, MilliSatoshi, UInt64}
 import scodec.bits.ByteVector
 
@@ -52,8 +52,10 @@ case class ChannelReserveTooHigh                   (override val channelId: Byte
 case class ChannelReserveBelowOurDustLimit         (override val channelId: ByteVector32, channelReserve: Satoshi, dustLimit: Satoshi) extends ChannelException(channelId, s"their channelReserve=$channelReserve is below our dustLimit=$dustLimit")
 case class ChannelReserveNotMet                    (override val channelId: ByteVector32, toLocal: MilliSatoshi, toRemote: MilliSatoshi, reserve: Satoshi) extends ChannelException(channelId, s"channel reserve is not met toLocal=$toLocal toRemote=$toRemote reserve=$reserve")
 case class MissingLiquidityAds                     (override val channelId: ByteVector32) extends ChannelException(channelId, "liquidity ads field is missing")
+case class InvalidLiquidityAdsAmount               (override val channelId: ByteVector32, proposed: Satoshi, min: Satoshi) extends ChannelException(channelId, s"liquidity ads funding amount is too low (expected at least $min, got $proposed)")
 case class InvalidLiquidityAdsSig                  (override val channelId: ByteVector32) extends ChannelException(channelId, "liquidity ads signature is invalid")
-case class LiquidityRatesRejected                  (override val channelId: ByteVector32) extends ChannelException(channelId, "rejecting liquidity ads proposed rates")
+case class InvalidLiquidityRates                   (override val channelId: ByteVector32) extends ChannelException(channelId, "rejecting liquidity ads proposed rates")
+case class InvalidLiquidityAdsDuration             (override val channelId: ByteVector32, leaseDuration: Int) extends ChannelException(channelId, s"rejecting liquidity ads proposed duration ($leaseDuration blocks)")
 case class ChannelFundingError                     (override val channelId: ByteVector32) extends ChannelException(channelId, "channel funding error")
 case class InvalidFundingTx                        (override val channelId: ByteVector32) extends ChannelException(channelId, "invalid funding tx")
 case class InvalidSerialId                         (override val channelId: ByteVector32, serialId: UInt64) extends ChannelException(channelId, s"invalid serial_id=${serialId.toByteVector.toHex}")

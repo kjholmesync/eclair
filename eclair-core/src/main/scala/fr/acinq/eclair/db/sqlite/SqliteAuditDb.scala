@@ -261,11 +261,11 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
       statement.setBytes(2, e.channelId.toArray)
       statement.setBytes(3, e.remoteNodeId.value.toArray)
       statement.setBoolean(4, false) // transaction isn't confirmed yet, we just published it
-      statement.setBoolean(5, e.purchase.isBuyer)
-      statement.setLong(6, e.purchase.lease.amount.toLong)
-      statement.setLong(7, e.purchase.lease.fees.toLong)
-      statement.setBytes(8, e.purchase.lease.sellerSig.toArray)
-      statement.setBytes(9, LiquidityAds.leaseWitnessCodec.encode(e.purchase.lease.witness).require.bytes.toArray)
+      statement.setBoolean(5, e.isBuyer)
+      statement.setLong(6, e.lease.amount.toLong)
+      statement.setLong(7, e.lease.fees.toLong)
+      statement.setBytes(8, e.lease.sellerSig.toArray)
+      statement.setBytes(9, LiquidityAds.LeaseWitness.codec.encode(e.lease.witness).require.bytes.toArray)
       statement.setLong(10, TimestampMilli.now().toLong)
       statement.executeUpdate()
     }
@@ -459,7 +459,7 @@ class SqliteAuditDb(val sqlite: Connection) extends AuditDb with Logging {
             amount = Satoshi(rs.getLong("amount_sat")),
             fees = Satoshi(rs.getLong("fee_sat")),
             sellerSig = ByteVector64(rs.getByteVector("seller_sig")),
-            witness = LiquidityAds.leaseWitnessCodec.decode(rs.getByteVector("witness").bits).require.value,
+            witness = LiquidityAds.LeaseWitness.codec.decode(rs.getByteVector("witness").bits).require.value,
           )
         )
       }.toSeq

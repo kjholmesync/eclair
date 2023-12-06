@@ -19,13 +19,14 @@ package fr.acinq.eclair.channel.states.a
 import akka.actor.typed.scaladsl.adapter.ClassicActorRefOps
 import akka.testkit.{TestFSMRef, TestProbe}
 import com.softwaremill.quicklens.ModifyPimp
-import fr.acinq.bitcoin.scalacompat.{ByteVector32, SatoshiLong}
+import fr.acinq.bitcoin.scalacompat.{ByteVector32, SatoshiLong, Script}
 import fr.acinq.eclair.TestConstants.Alice
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.channel.fsm.Channel
 import fr.acinq.eclair.channel.fsm.Channel.TickChannelOpenTimeout
 import fr.acinq.eclair.channel.states.{ChannelStateTestsBase, ChannelStateTestsTags}
 import fr.acinq.eclair.io.Peer.OpenChannelResponse
+import fr.acinq.eclair.transactions.Scripts
 import fr.acinq.eclair.wire.protocol.{AcceptDualFundedChannel, ChannelTlv, Error, Init, LiquidityAds, OpenDualFundedChannel}
 import fr.acinq.eclair.{BlockHeight, MilliSatoshiLong, TestConstants, TestKitBaseClass, randomBytes64}
 import org.scalatest.funsuite.FixtureAnyFunSuiteLike
@@ -100,7 +101,7 @@ class WaitForAcceptDualFundedChannelStateSpec extends TestKitBaseClass with Fixt
     assert(accept.upfrontShutdownScript_opt.isEmpty)
     assert(accept.channelType_opt.contains(ChannelTypes.AnchorOutputsZeroFeeHtlcTx()))
     assert(accept.fundingAmount == TestConstants.nonInitiatorFundingSatoshis)
-    assert(accept.willFund_opt.map(_.leaseRates).contains(TestConstants.defaultLiquidityRates))
+    assert(accept.willFund_opt.map(_.leaseRate(TestConstants.defaultLeaseDuration)).contains(TestConstants.defaultLiquidityRates))
     assert(accept.pushAmount == 0.msat)
     bob2alice.forward(alice, accept)
     awaitCond(alice.stateName == WAIT_FOR_DUAL_FUNDING_CREATED)
@@ -110,7 +111,7 @@ class WaitForAcceptDualFundedChannelStateSpec extends TestKitBaseClass with Fixt
     import f._
 
     val accept = bob2alice.expectMsgType[AcceptDualFundedChannel]
-    val willFundInvalidSig = ChannelTlv.WillFund(randomBytes64(), TestConstants.defaultLiquidityRates)
+    val willFundInvalidSig = accept.willFund_opt.get.copy(sig = randomBytes64())
     val acceptInvalidSig = accept
       .modify(_.tlvStream.records).using(_.filterNot(_.isInstanceOf[ChannelTlv.WillFund]))
       .modify(_.tlvStream.records).using(_ + willFundInvalidSig)
@@ -123,13 +124,23 @@ class WaitForAcceptDualFundedChannelStateSpec extends TestKitBaseClass with Fixt
     import f._
 
     val accept = bob2alice.expectMsgType[AcceptDualFundedChannel]
-    val highLeaseRates = LiquidityAds.LeaseRates(500, 1000, 100, 1000 sat, 1 msat)
-    val Some(willFundLease) = highLeaseRates.signLease(bob.underlyingActor.nodeParams.privateKey, bob.underlyingActor.nodeParams.currentBlockHeight, accept.fundingPubkey, open.fundingFeerate, open.requestFunds_opt, None)
+    val highLeaseRates = LiquidityAds.LeaseRate(TestConstants.defaultLeaseDuration, 500, 1000, 1000 sat, 100, 1 msat)
+    val fundingScript = Script.write(Script.pay2wsh(Scripts.multiSig2of2(open.fundingPubkey, accept.fundingPubkey)))
+    val willFundLease = highLeaseRates.signLease(bob.underlyingActor.nodeParams.privateKey, fundingScript, open.fundingFeerate, open.requestFunds_opt.get)
     val acceptHighFees = accept
       .modify(_.tlvStream.records).using(_.filterNot(_.isInstanceOf[ChannelTlv.WillFund]))
       .modify(_.tlvStream.records).using(_ + willFundLease.willFund)
     bob2alice.forward(alice, acceptHighFees)
     assert(alice2bob.expectMsgType[Error].toAscii.contains("rejecting liquidity ads proposed rates"))
+    awaitCond(alice.stateName == CLOSED)
+  }
+
+  test("recv AcceptDualFundedChannel (with invalid liquidity ads amount)", Tag(ChannelStateTestsTags.DualFunding), Tag(ChannelStateTestsTags.LiquidityAds), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
+    import f._
+
+    val accept = bob2alice.expectMsgType[AcceptDualFundedChannel].copy(fundingAmount = TestConstants.nonInitiatorFundingSatoshis / 2)
+    bob2alice.forward(alice, accept)
+    assert(alice2bob.expectMsgType[Error].toAscii.contains("liquidity ads funding amount is too low"))
     awaitCond(alice.stateName == CLOSED)
   }
 

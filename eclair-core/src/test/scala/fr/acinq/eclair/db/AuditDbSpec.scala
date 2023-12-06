@@ -138,12 +138,12 @@ class AuditDbSpec extends AnyFunSuite {
       val (nodeId1, nodeId2) = (randomKey().publicKey, randomKey().publicKey)
       val confirmedFundingTx = Transaction(2, Nil, Seq(TxOut(150_000 sat, Script.pay2wpkh(randomKey().publicKey))), 0)
       val unconfirmedFundingTx = Transaction(2, Nil, Seq(TxOut(100_000 sat, Script.pay2wpkh(randomKey().publicKey))), 0)
-      val e1a = LiquidityPurchased(null, randomBytes32(), nodeId1, confirmedFundingTx.txid, LiquidityAds.LiquidityPurchased(isBuyer = true, LiquidityAds.Lease(250_000 sat, 5_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomKey().publicKey, BlockHeight(500_000), 1000, 100, 5 msat))))
-      val e1b = LiquidityPurchased(null, randomBytes32(), nodeId1, confirmedFundingTx.txid, LiquidityAds.LiquidityPurchased(isBuyer = false, LiquidityAds.Lease(50_000 sat, 1_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomKey().publicKey, BlockHeight(600_000), 2000, 150, 10 msat))))
-      val e1c = LiquidityPurchased(null, e1b.channelId, nodeId1, confirmedFundingTx.txid, LiquidityAds.LiquidityPurchased(isBuyer = false, LiquidityAds.Lease(150_000 sat, 2_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomKey().publicKey, BlockHeight(610_000), 1500, 100, 0 msat))))
-      val e1d = LiquidityPurchased(null, randomBytes32(), nodeId1, unconfirmedFundingTx.txid, LiquidityAds.LiquidityPurchased(isBuyer = true, LiquidityAds.Lease(250_000 sat, 5_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomKey().publicKey, BlockHeight(625_000), 500, 50, 25 msat))))
-      val e2a = LiquidityPurchased(null, randomBytes32(), nodeId2, confirmedFundingTx.txid, LiquidityAds.LiquidityPurchased(isBuyer = false, LiquidityAds.Lease(200_000 sat, 2_500 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomKey().publicKey, BlockHeight(500_000), 2016, 0, 1 msat))))
-      val e2b = LiquidityPurchased(null, randomBytes32(), nodeId2, unconfirmedFundingTx.txid, LiquidityAds.LiquidityPurchased(isBuyer = false, LiquidityAds.Lease(200_000 sat, 2_500 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomKey().publicKey, BlockHeight(500_000), 2016, 0, 1 msat))))
+      val e1a = LiquidityPurchased(null, randomBytes32(), nodeId1, confirmedFundingTx.txid, isBuyer = true, LiquidityAds.Lease(250_000 sat, 5_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomBytes(10), 1000, BlockHeight(500_000), 100, 5 msat)))
+      val e1b = LiquidityPurchased(null, randomBytes32(), nodeId1, confirmedFundingTx.txid, isBuyer = false, LiquidityAds.Lease(50_000 sat, 1_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomBytes(15), 2000, BlockHeight(600_000), 150, 10 msat)))
+      val e1c = LiquidityPurchased(null, e1b.channelId, nodeId1, confirmedFundingTx.txid, isBuyer = false, LiquidityAds.Lease(150_000 sat, 2_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomBytes(12), 1500, BlockHeight(610_000), 100, 0 msat)))
+      val e1d = LiquidityPurchased(null, randomBytes32(), nodeId1, unconfirmedFundingTx.txid, isBuyer = true, LiquidityAds.Lease(250_000 sat, 5_000 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomBytes(37), 500, BlockHeight(625_000), 50, 25 msat)))
+      val e2a = LiquidityPurchased(null, randomBytes32(), nodeId2, confirmedFundingTx.txid, isBuyer = false, LiquidityAds.Lease(200_000 sat, 2_500 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomBytes(45), 2016, BlockHeight(500_000), 0, 1 msat)))
+      val e2b = LiquidityPurchased(null, randomBytes32(), nodeId2, unconfirmedFundingTx.txid, isBuyer = false, LiquidityAds.Lease(200_000 sat, 2_500 sat, randomBytes64(), LiquidityAds.LeaseWitness(randomBytes(25), 2016, BlockHeight(500_000), 0, 1 msat)))
 
       db.add(e1a)
       db.add(e1b)
@@ -159,8 +159,8 @@ class AuditDbSpec extends AnyFunSuite {
       db.add(TransactionConfirmed(randomBytes32(), nodeId1, confirmedFundingTx))
       db.add(TransactionConfirmed(randomBytes32(), nodeId2, confirmedFundingTx))
 
-      assert(db.listLiquidityPurchases(nodeId1).toSet == Set(e1a, e1b, e1c).map(_.purchase))
-      assert(db.listLiquidityPurchases(nodeId2) == Seq(e2a.purchase))
+      assert(db.listLiquidityPurchases(nodeId1).toSet == Set(e1a, e1b, e1c).map(e => LiquidityAds.LiquidityPurchased(e.isBuyer, e.lease)))
+      assert(db.listLiquidityPurchases(nodeId2) == Seq(LiquidityAds.LiquidityPurchased(e2a.isBuyer, e2a.lease)))
     }
   }
 

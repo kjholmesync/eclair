@@ -100,21 +100,11 @@ class WaitForOpenDualFundedChannelStateSpec extends TestKitBaseClass with Fixtur
     import f._
 
     val open = alice2bob.expectMsgType[OpenDualFundedChannel]
-    val openWithFundsRequest = open.copy(tlvStream = open.tlvStream.copy(records = open.tlvStream.records + ChannelTlv.RequestFunds(50_000 sat, BlockHeight(TestConstants.defaultBlockHeight) + 2016, 2016)))
+    val openWithFundsRequest = open.copy(tlvStream = open.tlvStream.copy(records = open.tlvStream.records + ChannelTlv.RequestFunds(50_000 sat, TestConstants.defaultLeaseDuration, BlockHeight(TestConstants.defaultBlockHeight) + TestConstants.defaultLeaseDuration)))
     alice2bob.forward(bob, openWithFundsRequest)
     val accept = bob2alice.expectMsgType[AcceptDualFundedChannel]
     assert(accept.willFund_opt.nonEmpty)
-    assert(accept.willFund_opt.map(_.leaseRates).contains(TestConstants.defaultLiquidityRates))
-  }
-
-  test("recv OpenDualFundedChannel (with invalid liquidity ads lease start)", Tag(ChannelStateTestsTags.DualFunding), Tag(ChannelStateTestsTags.LiquidityAds), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
-    import f._
-
-    val open = alice2bob.expectMsgType[OpenDualFundedChannel]
-    val openWithFundsRequest = open.copy(tlvStream = open.tlvStream.copy(records = open.tlvStream.records + ChannelTlv.RequestFunds(50_000 sat, BlockHeight(TestConstants.defaultBlockHeight) + 4032, 2016)))
-    alice2bob.forward(bob, openWithFundsRequest)
-    val accept = bob2alice.expectMsgType[AcceptDualFundedChannel]
-    assert(accept.willFund_opt.isEmpty)
+    assert(accept.willFund_opt.map(_.leaseRate(leaseDuration = TestConstants.defaultLeaseDuration)).contains(TestConstants.defaultLiquidityRates))
   }
 
   test("recv OpenDualFundedChannel (with push amount)", Tag(ChannelStateTestsTags.DualFunding), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>

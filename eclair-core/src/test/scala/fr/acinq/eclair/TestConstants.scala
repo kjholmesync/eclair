@@ -51,7 +51,8 @@ object TestConstants {
   val feeratePerKw: FeeratePerKw = FeeratePerKw(10_000 sat)
   val anchorOutputsFeeratePerKw: FeeratePerKw = FeeratePerKw(2_500 sat)
   val emptyOnionPacket: OnionRoutingPacket = OnionRoutingPacket(0, ByteVector.fill(33)(0), ByteVector.fill(1300)(0), ByteVector32.Zeroes)
-  val defaultLiquidityRates: LiquidityAds.LeaseRates = LiquidityAds.LeaseRates(500, 100, 10, 100 sat, 200 msat)
+  val defaultLeaseDuration: Int = 4032 // ~1 month
+  val defaultLiquidityRates: LiquidityAds.LeaseRate = LiquidityAds.LeaseRate(defaultLeaseDuration, 500, 100, 100 sat, 10, 200 msat)
 
   case object TestFeature extends Feature with InitFeature with NodeFeature {
     val rfcName = "test_feature"
@@ -226,7 +227,7 @@ object TestConstants {
         maxAttempts = 2,
       ),
       purgeInvoicesInterval = None,
-      liquidityAdsConfig_opt = Some(LiquidityAds.Config(defaultLiquidityRates.leaseFeeBase, defaultLiquidityRates.leaseFeeProportional, LiquidityAds.DEFAULT_LEASE_DURATION)),
+      liquidityAdsConfig_opt = Some(LiquidityAds.SellerConfig(Seq(LiquidityAds.LeaseRateConfig(defaultLiquidityRates, minAmount = 10_000 sat)))),
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(
@@ -392,7 +393,7 @@ object TestConstants {
         maxAttempts = 2,
       ),
       purgeInvoicesInterval = None,
-      liquidityAdsConfig_opt = Some(LiquidityAds.Config(defaultLiquidityRates.leaseFeeBase, defaultLiquidityRates.leaseFeeProportional, LiquidityAds.DEFAULT_LEASE_DURATION)),
+      liquidityAdsConfig_opt = Some(LiquidityAds.SellerConfig(Seq(LiquidityAds.LeaseRateConfig(defaultLiquidityRates, minAmount = 10_000 sat)))),
     )
 
     def channelParams: LocalParams = OpenChannelInterceptor.makeChannelParams(

@@ -349,7 +349,7 @@ object InteractiveTxBuilder {
             purpose: Purpose,
             localPushAmount: MilliSatoshi,
             remotePushAmount: MilliSatoshi,
-            liquidityPurchased_opt: Option[LiquidityAds.LiquidityPurchased],
+            liquidityPurchased_opt: Option[LiquidityAds.Lease],
             wallet: OnChainChannelFunder)(implicit ec: ExecutionContext): Behavior[Command] = {
     Behaviors.setup { context =>
       // The stash is used to buffer messages that arrive while we're funding the transaction.
@@ -392,7 +392,7 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
                                    purpose: Purpose,
                                    localPushAmount: MilliSatoshi,
                                    remotePushAmount: MilliSatoshi,
-                                   liquidityPurchased_opt: Option[LiquidityAds.LiquidityPurchased],
+                                   liquidityPurchased_opt: Option[LiquidityAds.Lease],
                                    wallet: OnChainChannelFunder,
                                    stash: StashBuffer[InteractiveTxBuilder.Command],
                                    context: ActorContext[InteractiveTxBuilder.Command])(implicit ec: ExecutionContext) {
@@ -747,8 +747,9 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
   private def signCommitTx(completeTx: SharedTransaction): Behavior[Command] = {
     val fundingTx = completeTx.buildUnsignedTx()
     val fundingOutputIndex = fundingTx.txOut.indexWhere(_.publicKeyScript == fundingPubkeyScript)
-    val localLiquidityFee = liquidityPurchased_opt.collect { case l if l.isBuyer => l.lease.fees }.getOrElse(0 sat)
-    val remoteLiquidityFee = liquidityPurchased_opt.collect { case l if !l.isBuyer => l.lease.fees }.getOrElse(0 sat)
+    // The initiator of the interactive-tx is the liquidity buyer (if liquidity ads is used).
+    val localLiquidityFee = liquidityPurchased_opt.collect { case lease if fundingParams.isInitiator => lease.fees }.getOrElse(0 sat)
+    val remoteLiquidityFee = liquidityPurchased_opt.collect { case lease if !fundingParams.isInitiator => lease.fees }.getOrElse(0 sat)
     Funding.makeCommitTxs(keyManager, channelParams,
       fundingAmount = fundingParams.fundingAmount,
       toLocal = completeTx.sharedOutput.localAmount - localPushAmount + remotePushAmount - localLiquidityFee + remoteLiquidityFee,
@@ -780,7 +781,7 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
     Behaviors.receiveMessagePartial {
       case SignTransactionResult(signedTx) =>
         log.info(s"interactive-tx txid=${signedTx.txId} partially signed with {} local inputs, {} remote inputs, {} local outputs and {} remote outputs", signedTx.tx.localInputs.length, signedTx.tx.remoteInputs.length, signedTx.tx.localOutputs.length, signedTx.tx.remoteOutputs.length)
-        liquidityPurchased_opt.foreach(purchase => context.system.eventStream ! EventStream.Publish(LiquidityPurchased(replyTo.toClassic, channelParams.channelId, remoteNodeId, signedTx.txId, purchase)))
+        liquidityPurchased_opt.foreach(lease => context.system.eventStream ! EventStream.Publish(LiquidityPurchased(replyTo.toClassic, channelParams.channelId, remoteNodeId, signedTx.txId, isBuyer = fundingParams.isInitiator, lease)))
         replyTo ! Succeeded(InteractiveTxSigningSession.WaitingForSigs(fundingParams, purpose.fundingTxIndex, signedTx, Left(localCommit), remoteCommit), commitSig)
         Behaviors.stopped
       case WalletFailure(t) =>

@@ -75,7 +75,7 @@ trait ExtraDirectives extends Directives {
   }
 
   def withRequestedRemoteFunding: Directive1[Option[LiquidityAds.RequestRemoteFundingParams]] = formFields("requestRemoteFundingSatoshis".as[Satoshi].?, "remoteFundingMaxFeeSatoshis".as[Satoshi].?, "remoteFundingDurationBlocks".as[Int].?).tflatMap {
-    case (Some(requestRemoteFunding), Some(remoteFundingMaxFee), leaseDuration_opt) => provide(Some(LiquidityAds.RequestRemoteFundingParams(requestRemoteFunding, leaseDuration_opt.getOrElse(LiquidityAds.DEFAULT_LEASE_DURATION), remoteFundingMaxFee)))
+    case (Some(requestRemoteFunding), Some(remoteFundingMaxFee), leaseDuration_opt) => provide(Some(LiquidityAds.RequestRemoteFundingParams(requestRemoteFunding, leaseDuration_opt.getOrElse(4032 /* ~1 month */), remoteFundingMaxFee)))
     case (Some(_), None, _) => reject(MalformedFormFieldRejection("remoteFundingMaxFeeSatoshis", "You must specify the maximum fee you're willing to pay when requesting inbound liquidity from the remote node"))
     case _ => provide(None)
   }

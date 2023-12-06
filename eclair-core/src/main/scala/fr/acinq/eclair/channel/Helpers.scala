@@ -246,7 +246,7 @@ object Helpers {
     if (accept.toSelfDelay > nodeParams.channelConf.maxToLocalDelay) return Left(ToSelfDelayTooHigh(accept.temporaryChannelId, accept.toSelfDelay, nodeParams.channelConf.maxToLocalDelay))
 
     // If we're purchasing liquidity, verify the liquidity ads:
-    val liquidityLease_opt = requestedFunds_opt.map(_.validateLeaseRates(remoteNodeId, accept.temporaryChannelId, accept.fundingPubkey, accept.fundingAmount, open.fundingFeerate, accept.willFund_opt) match {
+    val liquidityLease_opt = requestedFunds_opt.map(_.validateLease(remoteNodeId, accept.temporaryChannelId, Funding.makeFundingPubKeyScript(open.fundingPubkey, accept.fundingPubkey), accept.fundingAmount, open.fundingFeerate, accept.willFund_opt) match {
       case Left(t) => return Left(t)
       case Right(lease) => lease // we agree on liquidity rates, if any
     })
@@ -362,6 +362,8 @@ object Helpers {
   }
 
   object Funding {
+
+    def makeFundingPubKeyScript(localFundingKey: PublicKey, remoteFundingKey: PublicKey): ByteVector = Script.write(Script.pay2wsh(Scripts.multiSig2of2(localFundingKey, remoteFundingKey)))
 
     def makeFundingInputInfo(fundingTxId: TxId, fundingTxOutputIndex: Int, fundingSatoshis: Satoshi, fundingPubkey1: PublicKey, fundingPubkey2: PublicKey): InputInfo = {
       val fundingScript = multiSig2of2(fundingPubkey1, fundingPubkey2)

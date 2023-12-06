@@ -66,7 +66,7 @@ trait PathFinding {
     formFields(nodeIdsFormParam.?, "liquidityProvider".as[Boolean].?) { (nodeIds_opt, liquidityProviders_opt) =>
       complete(eclairApi.nodes(nodeIds_opt.map(_.toSet)).map(_.filter { n =>
         liquidityProviders_opt match {
-          case Some(true) => n.liquidityRates_opt.nonEmpty
+          case Some(true) => n.liquidityRates.nonEmpty
           case _ => true
         }
       }))

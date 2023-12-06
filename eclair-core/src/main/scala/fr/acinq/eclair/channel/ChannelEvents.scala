@@ -78,7 +78,7 @@ case class ChannelSignatureSent(channel: ActorRef, commitments: Commitments) ext
 
 case class ChannelSignatureReceived(channel: ActorRef, commitments: Commitments) extends ChannelEvent
 
-case class LiquidityPurchased(channel: ActorRef, channelId: ByteVector32, remoteNodeId: PublicKey, fundingTxId: TxId, purchase: LiquidityAds.LiquidityPurchased) extends ChannelEvent
+case class LiquidityPurchased(channel: ActorRef, channelId: ByteVector32, remoteNodeId: PublicKey, fundingTxId: TxId, isBuyer: Boolean, lease: LiquidityAds.Lease) extends ChannelEvent
 
 case class ChannelErrorOccurred(channel: ActorRef, channelId: ByteVector32, remoteNodeId: PublicKey, error: ChannelError, isFatal: Boolean) extends ChannelEvent
 

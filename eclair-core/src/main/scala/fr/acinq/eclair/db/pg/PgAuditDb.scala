@@ -274,11 +274,11 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
         statement.setString(2, e.channelId.toHex)
         statement.setString(3, e.remoteNodeId.toHex)
         statement.setBoolean(4, false) // transaction isn't confirmed yet, we just published it
-        statement.setBoolean(5, e.purchase.isBuyer)
-        statement.setLong(6, e.purchase.lease.amount.toLong)
-        statement.setLong(7, e.purchase.lease.fees.toLong)
-        statement.setString(8, e.purchase.lease.sellerSig.toHex)
-        statement.setString(9, LiquidityAds.leaseWitnessCodec.encode(e.purchase.lease.witness).require.bytes.toHex)
+        statement.setBoolean(5, e.isBuyer)
+        statement.setLong(6, e.lease.amount.toLong)
+        statement.setLong(7, e.lease.fees.toLong)
+        statement.setString(8, e.lease.sellerSig.toHex)
+        statement.setString(9, LiquidityAds.LeaseWitness.codec.encode(e.lease.witness).require.bytes.toHex)
         statement.setTimestamp(10, Timestamp.from(Instant.now()))
         statement.executeUpdate()
       }
@@ -490,7 +490,7 @@ class PgAuditDb(implicit ds: DataSource) extends AuditDb with Logging {
               amount = Satoshi(rs.getLong("amount_sat")),
               fees = Satoshi(rs.getLong("fee_sat")),
               sellerSig = ByteVector64.fromValidHex(rs.getString("seller_sig")),
-              witness = LiquidityAds.leaseWitnessCodec.decode(rs.getByteVectorFromHex("witness").bits).require.value,
+              witness = LiquidityAds.LeaseWitness.codec.decode(rs.getByteVectorFromHex("witness").bits).require.value,
             )
           )
         }.toSeq

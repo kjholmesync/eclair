@@ -305,7 +305,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     systemB.eventStream.subscribe(eventListenerB.ref, classOf[LiquidityPurchased])
 
     val sender = TestProbe()
-    val fundingRequest = LiquidityAds.RequestRemoteFunding(400_000 sat, 10_000 sat, alice.nodeParams.currentBlockHeight, 2016)
+    val fundingRequest = LiquidityAds.RequestRemoteFunding(400_000 sat, 15_000 sat, alice.nodeParams.currentBlockHeight, TestConstants.defaultLeaseDuration)
     val cmd = CMD_SPLICE(sender.ref, Some(SpliceIn(500_000 sat)), None, Some(fundingRequest))
     alice ! cmd
 
@@ -341,19 +341,19 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
     val eventA = eventListenerA.expectMsgType[LiquidityPurchased]
     assert(eventA.fundingTxId == spliceTx.txid)
-    assert(eventA.purchase.isBuyer)
-    assert(eventA.purchase.lease.amount == fundingRequest.fundingAmount)
-    assert(eventA.purchase.lease.fees > 0.sat)
+    assert(eventA.isBuyer)
+    assert(eventA.lease.amount == fundingRequest.fundingAmount)
+    assert(eventA.lease.fees > 0.sat)
     val eventB = eventListenerB.expectMsgType[LiquidityPurchased]
-    assert(!eventB.purchase.isBuyer)
-    assert(eventB.purchase.copy(isBuyer = true) == eventA.purchase)
+    assert(!eventB.isBuyer)
+    assert(eventB.lease == eventA.lease)
   }
 
   test("recv CMD_SPLICE (splice-in, liquidity ads, fee too high)", Tag(ChannelStateTestsTags.Quiescence)) { f =>
     import f._
 
     val sender = TestProbe()
-    val fundingRequest = LiquidityAds.RequestRemoteFunding(400_000 sat, 1_000 sat, alice.nodeParams.currentBlockHeight, 2016)
+    val fundingRequest = LiquidityAds.RequestRemoteFunding(400_000 sat, 1_000 sat, alice.nodeParams.currentBlockHeight, TestConstants.defaultLeaseDuration)
     val cmd = CMD_SPLICE(sender.ref, Some(SpliceIn(500_000 sat)), None, Some(fundingRequest))
     alice ! cmd
 
@@ -370,6 +370,57 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.capacity == 1_500_000.sat)
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toLocal == 800_000_000.msat)
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
+  }
+
+  test("recv CMD_SPLICE (splice-in, liquidity ads, below minimum funding amount)", Tag(ChannelStateTestsTags.Quiescence)) { f =>
+    import f._
+
+    val sender = TestProbe()
+    val fundingRequest = LiquidityAds.RequestRemoteFunding(5_000 sat, 5_000 sat, alice.nodeParams.currentBlockHeight, TestConstants.defaultLeaseDuration)
+    val cmd = CMD_SPLICE(sender.ref, Some(SpliceIn(500_000 sat)), None, Some(fundingRequest))
+    alice ! cmd
+
+    exchangeStfu(alice, bob, alice2bob, bob2alice)
+    assert(alice2bob.expectMsgType[SpliceInit].requestFunds_opt.nonEmpty)
+    alice2bob.forward(bob)
+    assert(bob2alice.expectMsgType[TxAbort].toAscii.contains("liquidity ads funding amount is too low"))
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[TxAbort]
+    alice2bob.forward(bob)
+  }
+
+  test("recv CMD_SPLICE (splice-in, liquidity ads, invalid lease duration)", Tag(ChannelStateTestsTags.Quiescence)) { f =>
+    import f._
+
+    val sender = TestProbe()
+    val fundingRequest = LiquidityAds.RequestRemoteFunding(100_000 sat, 20_000 sat, alice.nodeParams.currentBlockHeight, 144)
+    val cmd = CMD_SPLICE(sender.ref, Some(SpliceIn(500_000 sat)), None, Some(fundingRequest))
+    alice ! cmd
+
+    exchangeStfu(alice, bob, alice2bob, bob2alice)
+    assert(alice2bob.expectMsgType[SpliceInit].requestFunds_opt.nonEmpty)
+    alice2bob.forward(bob)
+    assert(bob2alice.expectMsgType[TxAbort].toAscii.contains("rejecting liquidity ads proposed duration"))
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[TxAbort]
+    alice2bob.forward(bob)
+  }
+
+  test("recv CMD_SPLICE (splice-in, liquidity ads, invalid lease start)", Tag(ChannelStateTestsTags.Quiescence)) { f =>
+    import f._
+
+    val sender = TestProbe()
+    val fundingRequest = LiquidityAds.RequestRemoteFunding(100_000 sat, 20_000 sat, alice.nodeParams.currentBlockHeight + 144, TestConstants.defaultLeaseDuration)
+    val cmd = CMD_SPLICE(sender.ref, Some(SpliceIn(500_000 sat)), None, Some(fundingRequest))
+    alice ! cmd
+
+    exchangeStfu(alice, bob, alice2bob, bob2alice)
+    assert(alice2bob.expectMsgType[SpliceInit].requestFunds_opt.nonEmpty)
+    alice2bob.forward(bob)
+    assert(bob2alice.expectMsgType[TxAbort].toAscii.contains("rejecting liquidity ads proposed duration"))
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[TxAbort]
+    alice2bob.forward(bob)
   }
 
   test("recv CMD_SPLICE (splice-in, local and remote commit index mismatch)", Tag(ChannelStateTestsTags.Quiescence)) { f =>

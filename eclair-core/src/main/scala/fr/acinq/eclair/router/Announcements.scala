@@ -68,7 +68,7 @@ object Announcements {
     )
   }
 
-  def makeNodeAnnouncement(nodeSecret: PrivateKey, alias: String, color: Color, nodeAddresses: List[NodeAddress], features: Features[NodeFeature], liquidityRates_opt: Option[LiquidityAds.LeaseRates], timestamp: TimestampSecond = TimestampSecond.now()): NodeAnnouncement = {
+  def makeNodeAnnouncement(nodeSecret: PrivateKey, alias: String, color: Color, nodeAddresses: List[NodeAddress], features: Features[NodeFeature], liquidityRates_opt: Option[Seq[LiquidityAds.LeaseRate]], timestamp: TimestampSecond = TimestampSecond.now()): NodeAnnouncement = {
     require(alias.length <= 32)
     // sort addresses by ascending address descriptor type; do not reorder addresses within the same descriptor type
     val sortedAddresses = nodeAddresses.map {
@@ -79,7 +79,7 @@ object Announcements {
       case address@(_: DnsHostname) => (5, address)
     }.sortBy(_._1).map(_._2)
     val tlvs: Set[NodeAnnouncementTlv] = Set(
-      liquidityRates_opt.map(NodeAnnouncementTlv.LiquidityAdsTlv),
+      liquidityRates_opt.map(r => NodeAnnouncementTlv.LiquidityAdsRates(r.toList)),
     ).flatten
     val witness = nodeAnnouncementWitnessEncode(timestamp, nodeSecret.publicKey, color, alias, features.unscoped(), sortedAddresses, TlvStream(tlvs))
     val sig = Crypto.sign(witness, nodeSecret)

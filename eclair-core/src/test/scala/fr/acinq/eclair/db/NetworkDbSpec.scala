@@ -58,7 +58,7 @@ class NetworkDbSpec extends AnyFunSuite {
       val db = dbs.network
 
       val node_1 = Announcements.makeNodeAnnouncement(randomKey(), "node-alice", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, Features.empty, None)
-      val node_2 = Announcements.makeNodeAnnouncement(randomKey(), "node-bob", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, Features(VariableLengthOnion -> Optional), Some(TestConstants.defaultLiquidityRates))
+      val node_2 = Announcements.makeNodeAnnouncement(randomKey(), "node-bob", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, Features(VariableLengthOnion -> Optional), Some(TestConstants.defaultLiquidityRates :: Nil))
       val node_3 = Announcements.makeNodeAnnouncement(randomKey(), "node-charlie", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, Features(VariableLengthOnion -> Optional), None)
       val node_4 = Announcements.makeNodeAnnouncement(randomKey(), "node-eve", Color(100.toByte, 200.toByte, 300.toByte), Tor3("of7husrflx7sforh3fw6yqlpwstee3wg5imvvmkp4bz6rbjxtg5nljad", 42000) :: Nil, Features.empty, None)
       val node_5 = Announcements.makeNodeAnnouncement(randomKey(), "node-frank", Color(100.toByte, 200.toByte, 300.toByte), DnsHostname("eclair.invalid", 42000) :: Nil, Features.empty, None)
