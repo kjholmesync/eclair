@@ -12,7 +12,7 @@ import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.MilliSatoshiLong
 import fr.acinq.eclair.channel.fund.InteractiveTxBuilder.{FullySignedSharedTransaction, PartiallySignedSharedTransaction}
 import fr.acinq.eclair.transactions.Transactions._
-import fr.acinq.eclair.transactions.{CommitmentSpec, DirectedHtlc, IncomingHtlc, OutgoingHtlc}
+import fr.acinq.eclair.transactions.{CommitmentSpec, DirectedHtlc, IncomingHtlc, LeaseSpec, OutgoingHtlc}
 import fr.acinq.eclair.wire.protocol.CommonCodecs._
 import fr.acinq.eclair.wire.protocol.LightningMessageCodecs._
 import fr.acinq.eclair.wire.protocol.{TxSignatures, UpdateAddHtlc, UpdateMessage}
@@ -95,7 +95,9 @@ private[channel] object ChannelCodecs4 {
       ("htlcs" | setCodec(directedHtlcCodec)) ::
         ("feeratePerKw" | feeratePerKw) ::
         ("toLocal" | millisatoshi) ::
-        ("toRemote" | millisatoshi)).as[CommitmentSpec]
+        ("toRemoteLeased" | provide(Seq.empty[LeaseSpec])) ::
+        ("toRemote" | millisatoshi) ::
+        ("toRemoteLeased" | provide(Seq.empty[LeaseSpec]))).as[CommitmentSpec]
 
     /** HTLCs are stored separately to avoid duplicating data. */
     def minimalCommitmentSpecCodec(htlcs: Set[DirectedHtlc]): Codec[CommitmentSpec] = baseCommitmentSpecCodec(minimalDirectedHtlcCodec(htlcs))

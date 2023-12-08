@@ -414,8 +414,9 @@ object Helpers {
                       remotePerCommitmentPoint: PublicKey,
                       localCommitmentIndex: Long, remoteCommitmentIndex: Long): Either[ChannelException, (CommitmentSpec, CommitTx, CommitmentSpec, CommitTx, Seq[HtlcTx])] = {
       import params._
-      val localSpec = CommitmentSpec(localHtlcs, commitTxFeerate, toLocal = toLocal, toRemote = toRemote)
-      val remoteSpec = CommitmentSpec(localHtlcs.map(_.opposite), commitTxFeerate, toLocal = toRemote, toRemote = toLocal)
+      // TODO: we should instead use the current leases (if any)
+      val localSpec = CommitmentSpec(localHtlcs, commitTxFeerate, toLocal = toLocal, toLocalLeased = Nil, toRemote = toRemote, toRemoteLeased = Nil)
+      val remoteSpec = CommitmentSpec(localHtlcs.map(_.opposite), commitTxFeerate, toLocal = toRemote, toLocalLeased = Nil, toRemote = toLocal, toRemoteLeased = Nil)
 
       if (!localParams.isInitiator) {
         // They initiated the channel open, therefore they pay the fee: we need to make sure they can afford it!

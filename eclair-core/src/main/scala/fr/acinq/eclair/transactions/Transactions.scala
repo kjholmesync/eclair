@@ -425,6 +425,26 @@ object Transactions {
       }
     }
 
+    spec.toLocalLeased.foreach(l => {
+      if (l.amount >= localDustLimit) {
+        outputs.append(CommitmentOutputLink(
+          // TODO: should actually be a script that takes CLTV into account
+          TxOut(l.amount.truncateToSatoshi, pay2wsh(toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey))),
+          toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey),
+          ToLocal))
+      }
+    })
+
+    spec.toRemoteLeased.foreach(l => {
+      if (l.amount >= localDustLimit) {
+        outputs.append(CommitmentOutputLink(
+          // TODO: should actually be a script that takes CLTV into account
+          TxOut(l.amount.truncateToSatoshi, pay2wsh(toRemoteDelayed(remotePaymentPubkey))),
+          toRemoteDelayed(remotePaymentPubkey),
+          ToRemote))
+      }
+    })
+
     commitmentFormat match {
       case _: AnchorOutputsCommitmentFormat =>
         if (toLocalAmount >= localDustLimit || hasHtlcs) {

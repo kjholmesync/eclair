@@ -24,7 +24,7 @@ import fr.acinq.eclair.channel.LocalFundingStatus.SingleFundedUnconfirmedFunding
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.transactions.Transactions._
-import fr.acinq.eclair.transactions.{CommitmentSpec, DirectedHtlc, IncomingHtlc, OutgoingHtlc}
+import fr.acinq.eclair.transactions.{CommitmentSpec, DirectedHtlc, IncomingHtlc, LeaseSpec, OutgoingHtlc}
 import fr.acinq.eclair.wire.internal.channel.version0.ChannelTypes0
 import fr.acinq.eclair.wire.internal.channel.version0.ChannelTypes0.{HtlcTxAndSigs, PublishableTxs}
 import fr.acinq.eclair.wire.protocol.CommonCodecs._
@@ -93,7 +93,9 @@ private[channel] object ChannelCodecs2 {
       ("htlcs" | setCodec(htlcCodec)) ::
         ("feeratePerKw" | feeratePerKw) ::
         ("toLocal" | millisatoshi) ::
-        ("toRemote" | millisatoshi)).as[CommitmentSpec]
+        ("toRemoteLeased" | provide(Seq.empty[LeaseSpec])) ::
+        ("toRemote" | millisatoshi) ::
+        ("toRemoteLeased" | provide(Seq.empty[LeaseSpec]))).as[CommitmentSpec]
 
     val outPointCodec: Codec[OutPoint] = lengthDelimited(bytes.xmap(d => OutPoint.read(d.toArray), d => OutPoint.write(d)))
 

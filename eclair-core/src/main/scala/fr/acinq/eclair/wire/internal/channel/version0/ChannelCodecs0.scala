@@ -109,7 +109,9 @@ private[channel] object ChannelCodecs0 {
       ("htlcs" | setCodec(htlcCodec)) ::
         ("feeratePerKw" | feeratePerKw) ::
         ("toLocal" | millisatoshi) ::
-        ("toRemote" | millisatoshi)).as[CommitmentSpec].decodeOnly
+        ("toLocalLeased" | provide(Seq.empty[LeaseSpec])) ::
+        ("toRemote" | millisatoshi) ::
+        ("toRemoteLeased" | provide(Seq.empty[LeaseSpec]))).as[CommitmentSpec].decodeOnly
 
     val outPointCodec: Codec[OutPoint] = variableSizeBytes(uint16, bytes.xmap(d => OutPoint.read(d.toArray), d => OutPoint.write(d)))
 
