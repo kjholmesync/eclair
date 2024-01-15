@@ -58,7 +58,7 @@ class MultiPartHandler(nodeParams: NodeParams, register: ActorRef, db: IncomingP
   // NB: this is safe because this handler will be called from within an actor
   private var pendingPayments: Map[ByteVector32, (IncomingPayment, ActorRef)] = Map.empty
 
-  private def addHtlcPart(ctx: ActorContext, add: UpdateAddHtlc, payload: FinalPayload, payment: IncomingPayment): Unit = {
+  private def addHtlcPart(ctx: ActorContext, add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload, payment: IncomingPayment): Unit = {
     pendingPayments.get(add.paymentHash) match {
       case Some((_, handler)) =>
         handler ! MultiPartPaymentFSM.HtlcPart(payload.totalAmount, add)
@@ -233,8 +233,8 @@ class MultiPartHandler(nodeParams: NodeParams, register: ActorRef, db: IncomingP
 object MultiPartHandler {
 
   // @formatter:off
-  case class ProcessPacket(add: UpdateAddHtlc, payload: FinalPayload.Standard, payment_opt: Option[IncomingStandardPayment])
-  case class ProcessBlindedPacket(add: UpdateAddHtlc, payload: FinalPayload.Blinded, payment: IncomingBlindedPayment)
+  case class ProcessPacket(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload.Standard, payment_opt: Option[IncomingStandardPayment])
+  case class ProcessBlindedPacket(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload.Blinded, payment: IncomingBlindedPayment)
   case class RejectPacket(add: UpdateAddHtlc, failure: FailureMessage)
   case class DoFulfill(payment: IncomingPayment, success: MultiPartPaymentFSM.MultiPartPaymentSucceeded)
 
@@ -421,7 +421,7 @@ object MultiPartHandler {
           Behaviors.receiveMessagePartial {
             case GetIncomingPayment(replyTo) =>
               packet.payload match {
-                case payload: FinalPayload.Standard =>
+                case payload: FinalPayload.RecipientPayload.Standard =>
                   nodeParams.db.payments.getIncomingPayment(packet.add.paymentHash) match {
                     case Some(_: IncomingBlindedPayment) =>
                       context.log.info("rejecting non-blinded htlc #{} from channel {}: expected a blinded payment", packet.add.id, packet.add.channelId)
@@ -430,7 +430,7 @@ object MultiPartHandler {
                     case None => replyTo ! ProcessPacket(packet.add, payload, None)
                   }
                   Behaviors.stopped
-                case payload: FinalPayload.Blinded =>
+                case payload: FinalPayload.RecipientPayload.Blinded =>
                   offerManager ! OfferManager.ReceivePayment(context.self, packet.add.paymentHash, payload)
                   waitForPayment(context, nodeParams, replyTo, packet.add, payload)
               }
@@ -439,7 +439,7 @@ object MultiPartHandler {
       }
     }
 
-    private def waitForPayment(context: typed.scaladsl.ActorContext[Command], nodeParams: NodeParams, replyTo: ActorRef, add: UpdateAddHtlc, payload: FinalPayload.Blinded): Behavior[Command] = {
+    private def waitForPayment(context: typed.scaladsl.ActorContext[Command], nodeParams: NodeParams, replyTo: ActorRef, add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload.Blinded): Behavior[Command] = {
       Behaviors.receiveMessagePartial {
         case ProcessPayment(payment) =>
           replyTo ! ProcessBlindedPacket(add, payload, payment)
@@ -452,7 +452,7 @@ object MultiPartHandler {
     }
   }
 
-  private def validatePaymentStatus(add: UpdateAddHtlc, payload: FinalPayload, record: IncomingPayment)(implicit log: LoggingAdapter): Boolean = {
+  private def validatePaymentStatus(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload, record: IncomingPayment)(implicit log: LoggingAdapter): Boolean = {
     if (record.status.isInstanceOf[IncomingPaymentStatus.Received]) {
       log.warning("ignoring incoming payment for which has already been paid")
       false
@@ -464,7 +464,7 @@ object MultiPartHandler {
     }
   }
 
-  private def validatePaymentAmount(add: UpdateAddHtlc, payload: FinalPayload, expectedAmount: MilliSatoshi)(implicit log: LoggingAdapter): Boolean = {
+  private def validatePaymentAmount(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload, expectedAmount: MilliSatoshi)(implicit log: LoggingAdapter): Boolean = {
     // The total amount must be equal or greater than the requested amount. A slight overpaying is permitted, however
     // it must not be greater than two times the requested amount.
     // see https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#failure-messages
@@ -479,7 +479,7 @@ object MultiPartHandler {
     }
   }
 
-  private def validatePaymentCltv(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload)(implicit log: LoggingAdapter): Boolean = {
+  private def validatePaymentCltv(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload)(implicit log: LoggingAdapter): Boolean = {
     val minExpiry = nodeParams.channelConf.minFinalExpiryDelta.toCltvExpiry(nodeParams.currentBlockHeight)
     if (add.cltvExpiry < minExpiry) {
       log.warning("received payment with expiry too small for amount={} totalAmount={}", add.amountMsat, payload.totalAmount)
@@ -489,7 +489,7 @@ object MultiPartHandler {
     }
   }
 
-  private def validateInvoiceFeatures(add: UpdateAddHtlc, payload: FinalPayload, invoice: Invoice)(implicit log: LoggingAdapter): Boolean = {
+  private def validateInvoiceFeatures(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload, invoice: Invoice)(implicit log: LoggingAdapter): Boolean = {
     if (payload.amount < payload.totalAmount && !invoice.features.hasFeature(Features.BasicMultiPartPayment)) {
       log.warning("received multi-part payment but invoice doesn't support it for amount={} totalAmount={}", add.amountMsat, payload.totalAmount)
       false
@@ -498,7 +498,7 @@ object MultiPartHandler {
     }
   }
 
-  private def validatePaymentSecret(add: UpdateAddHtlc, payload: FinalPayload.Standard, invoice: Bolt11Invoice)(implicit log: LoggingAdapter): Boolean = {
+  private def validatePaymentSecret(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload.Standard, invoice: Bolt11Invoice)(implicit log: LoggingAdapter): Boolean = {
     if (payload.amount < payload.totalAmount && invoice.paymentSecret != payload.paymentSecret) {
       log.warning("received multi-part payment with invalid secret={} for amount={} totalAmount={}", payload.paymentSecret, add.amountMsat, payload.totalAmount)
       false
@@ -510,7 +510,7 @@ object MultiPartHandler {
     }
   }
 
-  private def validateCommon(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload, record: IncomingPayment)(implicit log: LoggingAdapter): Boolean = {
+  private def validateCommon(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload, record: IncomingPayment)(implicit log: LoggingAdapter): Boolean = {
     val paymentAmountOk = record.invoice.amount_opt.forall(a => validatePaymentAmount(add, payload, a))
     val paymentCltvOk = validatePaymentCltv(nodeParams, add, payload)
     val paymentStatusOk = validatePaymentStatus(add, payload, record)
@@ -518,7 +518,7 @@ object MultiPartHandler {
     paymentAmountOk && paymentCltvOk && paymentStatusOk && paymentFeaturesOk
   }
 
-  private def validateStandardPayment(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload.Standard, record: IncomingStandardPayment)(implicit log: LoggingAdapter): Option[CMD_FAIL_HTLC] = {
+  private def validateStandardPayment(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload.Standard, record: IncomingStandardPayment)(implicit log: LoggingAdapter): Option[CMD_FAIL_HTLC] = {
     // We send the same error regardless of the failure to avoid probing attacks.
     val cmdFail = CMD_FAIL_HTLC(add.id, Right(IncorrectOrUnknownPaymentDetails(payload.totalAmount, nodeParams.currentBlockHeight)), commit = true)
     val commonOk = validateCommon(nodeParams, add, payload, record)
@@ -526,7 +526,7 @@ object MultiPartHandler {
     if (commonOk && secretOk) None else Some(cmdFail)
   }
 
-  private def validateBlindedPayment(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload.Blinded, record: IncomingBlindedPayment)(implicit log: LoggingAdapter): Option[CMD_FAIL_HTLC] = {
+  private def validateBlindedPayment(nodeParams: NodeParams, add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload.Blinded, record: IncomingBlindedPayment)(implicit log: LoggingAdapter): Option[CMD_FAIL_HTLC] = {
     // We send the same error regardless of the failure to avoid probing attacks.
     val cmdFail = CMD_FAIL_HTLC(add.id, Right(IncorrectOrUnknownPaymentDetails(payload.totalAmount, nodeParams.currentBlockHeight)), commit = true)
     val commonOk = validateCommon(nodeParams, add, payload, record)

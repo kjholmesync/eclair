@@ -23,7 +23,7 @@ import fr.acinq.eclair.payment.Invoice.ExtraEdge
 import fr.acinq.eclair.payment.OutgoingPaymentPacket._
 import fr.acinq.eclair.payment.{Bolt11Invoice, Bolt12Invoice, OutgoingPaymentPacket, PaymentBlindedRoute}
 import fr.acinq.eclair.router.Router._
-import fr.acinq.eclair.wire.protocol.PaymentOnion.{FinalPayload, IntermediatePayload, OutgoingBlindedPerHopPayload}
+import fr.acinq.eclair.wire.protocol.PaymentOnion.{FinalPayload, IntermediatePayload, OutgoingBlindedPerHopPayload, createNodeRelayToNonTrampolinePayload}
 import fr.acinq.eclair.wire.protocol.{GenericTlv, OnionRoutingPacket}
 import fr.acinq.eclair.{CltvExpiry, Features, InvoiceFeature, MilliSatoshi, MilliSatoshiLong, ShortChannelId}
 import scodec.bits.ByteVector
@@ -77,8 +77,8 @@ case class ClearRecipient(nodeId: PublicKey,
   override def buildPayloads(paymentHash: ByteVector32, route: Route): Either[OutgoingPaymentError, PaymentPayloads] = {
     ClearRecipient.validateRoute(nodeId, route).map(_ => {
       val finalPayload = nextTrampolineOnion_opt match {
-        case Some(trampolinePacket) => NodePayload(nodeId, FinalPayload.Standard.createTrampolinePayload(route.amount, totalAmount, expiry, paymentSecret, trampolinePacket))
-        case None => NodePayload(nodeId, FinalPayload.Standard.createPayload(route.amount, totalAmount, expiry, paymentSecret, paymentMetadata_opt, customTlvs))
+        case Some(trampolinePacket) => NodePayload(nodeId, FinalPayload.RecipientPayload.Standard.createTrampolinePayload(route.amount, totalAmount, expiry, paymentSecret, trampolinePacket))
+        case None => NodePayload(nodeId, FinalPayload.RecipientPayload.Standard.createPayload(route.amount, totalAmount, expiry, paymentSecret, paymentMetadata_opt, customTlvs))
       }
       Recipient.buildPayloads(route.amount, expiry, Seq(finalPayload), route.hops)
     })
@@ -110,7 +110,7 @@ case class SpontaneousRecipient(nodeId: PublicKey,
 
   override def buildPayloads(paymentHash: ByteVector32, route: Route): Either[OutgoingPaymentError, PaymentPayloads] = {
     ClearRecipient.validateRoute(nodeId, route).map(_ => {
-      val finalPayload = NodePayload(nodeId, FinalPayload.Standard.createKeySendPayload(route.amount, expiry, preimage, customTlvs))
+      val finalPayload = NodePayload(nodeId, FinalPayload.RecipientPayload.Standard.createKeySendPayload(route.amount, expiry, preimage, customTlvs))
       Recipient.buildPayloads(totalAmount, expiry, Seq(finalPayload), route.hops)
     })
   }
@@ -219,7 +219,7 @@ case class ClearTrampolineRecipient(invoice: Bolt11Invoice,
       trampolineHop <- validateRoute(route)
       trampolineOnion <- createTrampolinePacket(paymentHash, trampolineHop)
     } yield {
-      val trampolinePayload = NodePayload(trampolineHop.nodeId, FinalPayload.Standard.createTrampolinePayload(route.amount, trampolineAmount, trampolineExpiry, trampolinePaymentSecret, trampolineOnion.packet))
+      val trampolinePayload = NodePayload(trampolineHop.nodeId, FinalPayload.RecipientPayload.Standard.createTrampolinePayload(route.amount, trampolineAmount, trampolineExpiry, trampolinePaymentSecret, trampolineOnion.packet))
       Recipient.buildPayloads(route.amount, trampolineExpiry, Seq(trampolinePayload), route.hops)
     }
   }
@@ -227,7 +227,7 @@ case class ClearTrampolineRecipient(invoice: Bolt11Invoice,
   private def createTrampolinePacket(paymentHash: ByteVector32, trampolineHop: NodeHop): Either[OutgoingPaymentError, Sphinx.PacketAndSecrets] = {
     if (invoice.features.hasFeature(Features.TrampolinePaymentPrototype)) {
       // This is the payload the final recipient will receive, so we use the invoice's payment secret.
-      val finalPayload = NodePayload(nodeId, FinalPayload.Standard.createPayload(totalAmount, totalAmount, expiry, invoice.paymentSecret, invoice.paymentMetadata, customTlvs))
+      val finalPayload = NodePayload(nodeId, FinalPayload.RecipientPayload.Standard.createPayload(totalAmount, totalAmount, expiry, invoice.paymentSecret, invoice.paymentMetadata, customTlvs))
       val trampolinePayload = NodePayload(trampolineHop.nodeId, IntermediatePayload.NodeRelay.Standard(totalAmount, expiry, nodeId))
       val payloads = Seq(trampolinePayload, finalPayload)
       OutgoingPaymentPacket.buildOnion(payloads, paymentHash, packetPayloadLength_opt = None)
@@ -235,7 +235,7 @@ case class ClearTrampolineRecipient(invoice: Bolt11Invoice,
       // The recipient doesn't support trampoline: the trampoline node will convert the payment to a non-trampoline payment.
       // The final payload will thus never reach the recipient, so we create the smallest payload possible to avoid overflowing the trampoline onion size.
       val dummyFinalPayload = NodePayload(nodeId, IntermediatePayload.ChannelRelay.Standard(ShortChannelId(0), 0 msat, CltvExpiry(0)))
-      val trampolinePayload = NodePayload(trampolineHop.nodeId, IntermediatePayload.NodeRelay.Standard.createNodeRelayToNonTrampolinePayload(totalAmount, totalAmount, expiry, nodeId, invoice))
+      val trampolinePayload = NodePayload(trampolineHop.nodeId, createNodeRelayToNonTrampolinePayload(totalAmount, totalAmount, expiry, invoice))
       val payloads = Seq(trampolinePayload, dummyFinalPayload)
       OutgoingPaymentPacket.buildOnion(payloads, paymentHash, packetPayloadLength_opt = None)
     }

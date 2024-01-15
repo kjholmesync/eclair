@@ -84,7 +84,7 @@ class OfferManagerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("app
     invoice
   }
 
-  def createPaymentPayload(f: FixtureParam, invoice: Bolt12Invoice): PaymentOnion.FinalPayload.Blinded = {
+  def createPaymentPayload(f: FixtureParam, invoice: Bolt12Invoice): PaymentOnion.FinalPayload.RecipientPayload.Blinded = {
     import f._
 
     assert(invoice.blindedPaths.length == 1)
@@ -95,7 +95,7 @@ class OfferManagerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("app
       OnionPaymentPayloadTlv.TotalAmount(invoice.amount),
       OnionPaymentPayloadTlv.OutgoingCltv(CltvExpiry(nodeParams.currentBlockHeight) + invoice.blindedPaths.head.paymentInfo.cltvExpiryDelta),
     )
-    PaymentOnion.FinalPayload.Blinded(paymentTlvs, encryptedDataTlvs)
+    PaymentOnion.FinalPayload.RecipientPayload.Blinded(paymentTlvs, encryptedDataTlvs)
   }
 
   def payOffer(f: FixtureParam, pathId_opt: Option[ByteVector32]): Unit = {

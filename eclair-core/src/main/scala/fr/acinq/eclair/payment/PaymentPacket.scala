@@ -43,7 +43,7 @@ object IncomingPaymentPacket {
 
   // @formatter:off
   /** We are the final recipient. */
-  case class FinalPacket(add: UpdateAddHtlc, payload: FinalPayload) extends IncomingPaymentPacket
+  case class FinalPacket(add: UpdateAddHtlc, payload: FinalPayload.RecipientPayload) extends IncomingPaymentPacket
   /** We are an intermediate node. */
   sealed trait RelayPacket extends IncomingPaymentPacket
   /** We must relay the payment to a direct peer. */
@@ -54,7 +54,7 @@ object IncomingPaymentPacket {
     val expiryDelta: CltvExpiryDelta = add.cltvExpiry - outgoingCltv
   }
   /** We must relay the payment to a remote node. */
-  case class NodeRelayPacket(add: UpdateAddHtlc, outerPayload: FinalPayload.Standard, innerPayload: IntermediatePayload.NodeRelay.Standard, nextPacket: OnionRoutingPacket) extends RelayPacket
+  case class NodeRelayPacket(add: UpdateAddHtlc, outerPayload: FinalPayload.RecipientPayload.Standard, innerPayload: IntermediatePayload.NodeRelay.Standard, nextPacket: OnionRoutingPacket) extends RelayPacket
   // @formatter:on
 
   case class DecodedOnionPacket(payload: TlvStream[OnionPaymentPayloadTlv], next_opt: Option[OnionRoutingPacket])
@@ -169,7 +169,7 @@ object IncomingPaymentPacket {
   }
 
   private def validateFinalPayload(add: UpdateAddHtlc, payload: TlvStream[OnionPaymentPayloadTlv]): Either[FailureMessage, FinalPacket] = {
-    FinalPayload.Standard.validate(payload).left.map(_.failureMessage).flatMap {
+    FinalPayload.RecipientPayload.Standard.validate(payload).left.map(_.failureMessage).flatMap {
       case payload if add.amountMsat < payload.amount => Left(FinalIncorrectHtlcAmount(add.amountMsat))
       case payload if add.cltvExpiry < payload.expiry => Left(FinalIncorrectCltvExpiry(add.cltvExpiry))
       case payload => Right(FinalPacket(add, payload))
@@ -177,7 +177,7 @@ object IncomingPaymentPacket {
   }
 
   private def validateBlindedFinalPayload(add: UpdateAddHtlc, payload: TlvStream[OnionPaymentPayloadTlv], blindedPayload: TlvStream[RouteBlindingEncryptedDataTlv]): Either[FailureMessage, FinalPacket] = {
-    FinalPayload.Blinded.validate(payload, blindedPayload).left.map(_.failureMessage).flatMap {
+    FinalPayload.RecipientPayload.Blinded.validate(payload, blindedPayload).left.map(_.failureMessage).flatMap {
       case payload if add.amountMsat < payload.paymentConstraints.minAmount => Left(InvalidOnionBlinding(Sphinx.hash(add.onionRoutingPacket)))
       case payload if add.cltvExpiry > payload.paymentConstraints.maxCltvExpiry => Left(InvalidOnionBlinding(Sphinx.hash(add.onionRoutingPacket)))
       case payload if !Features.areCompatible(Features.empty, payload.allowedFeatures) => Left(InvalidOnionBlinding(Sphinx.hash(add.onionRoutingPacket)))
@@ -189,8 +189,8 @@ object IncomingPaymentPacket {
 
   private def validateTrampolineFinalPayload(add: UpdateAddHtlc, outerPayload: TlvStream[OnionPaymentPayloadTlv], innerPayload: TlvStream[OnionPaymentPayloadTlv]): Either[FailureMessage, FinalPacket] = {
     // The outer payload cannot use route blinding, but the inner payload may (but it's not supported yet).
-    FinalPayload.Standard.validate(outerPayload).left.map(_.failureMessage).flatMap { outerPayload =>
-      FinalPayload.Standard.validate(innerPayload).left.map(_.failureMessage).flatMap {
+    FinalPayload.RecipientPayload.Standard.validate(outerPayload).left.map(_.failureMessage).flatMap { outerPayload =>
+      FinalPayload.RecipientPayload.Standard.validate(innerPayload).left.map(_.failureMessage).flatMap {
         case _ if add.amountMsat < outerPayload.amount => Left(FinalIncorrectHtlcAmount(add.amountMsat))
         case _ if add.cltvExpiry < outerPayload.expiry => Left(FinalIncorrectCltvExpiry(add.cltvExpiry))
         case innerPayload if outerPayload.expiry < innerPayload.expiry => Left(FinalIncorrectCltvExpiry(add.cltvExpiry)) // previous trampoline didn't forward the right expiry
@@ -198,18 +198,18 @@ object IncomingPaymentPacket {
         case innerPayload =>
           // We merge contents from the outer and inner payloads.
           // We must use the inner payload's total amount and payment secret because the payment may be split between multiple trampoline payments (#reckless).
-          Right(FinalPacket(add, FinalPayload.Standard.createPayload(outerPayload.amount, innerPayload.totalAmount, innerPayload.expiry, innerPayload.paymentSecret, innerPayload.paymentMetadata)))
+          Right(FinalPacket(add, FinalPayload.RecipientPayload.Standard.createPayload(outerPayload.amount, innerPayload.totalAmount, innerPayload.expiry, innerPayload.paymentSecret, innerPayload.paymentMetadata)))
       }
     }
   }
 
   private def validateNodeRelay(add: UpdateAddHtlc, outerPayload: TlvStream[OnionPaymentPayloadTlv], innerPayload: TlvStream[OnionPaymentPayloadTlv], next: OnionRoutingPacket): Either[FailureMessage, NodeRelayPacket] = {
     // The outer payload cannot use route blinding, but the inner payload may (but it's not supported yet).
-    FinalPayload.Standard.validate(outerPayload).left.map(_.failureMessage).flatMap { outerPayload =>
+    FinalPayload.RecipientPayload.Standard.validate(outerPayload).left.map(_.failureMessage).flatMap { outerPayload =>
       IntermediatePayload.NodeRelay.Standard.validate(innerPayload).left.map(_.failureMessage).flatMap {
         case _ if add.amountMsat < outerPayload.amount => Left(FinalIncorrectHtlcAmount(add.amountMsat))
         case _ if add.cltvExpiry != outerPayload.expiry => Left(FinalIncorrectCltvExpiry(add.cltvExpiry))
-        case innerPayload => Right(NodeRelayPacket(add, outerPayload, innerPayload, next))
+        case innerPayload: IntermediatePayload.NodeRelay.Standard => Right(NodeRelayPacket(add, outerPayload, innerPayload, next))
       }
     }
   }

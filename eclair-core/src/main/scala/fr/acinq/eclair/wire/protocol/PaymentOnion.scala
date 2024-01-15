@@ -18,7 +18,7 @@ package fr.acinq.eclair.wire.protocol
 
 import fr.acinq.bitcoin.scalacompat.ByteVector32
 import fr.acinq.bitcoin.scalacompat.Crypto.PublicKey
-import fr.acinq.eclair.payment.Bolt11Invoice
+import fr.acinq.eclair.payment.{Bolt11Invoice, Bolt12Invoice, Invoice, PaymentBlindedContactInfo}
 import fr.acinq.eclair.wire.protocol.CommonCodecs._
 import fr.acinq.eclair.wire.protocol.OnionRoutingCodecs.{ForbiddenTlv, InvalidTlvPayload, MissingRequiredTlv}
 import fr.acinq.eclair.wire.protocol.TlvCodecs._
@@ -184,6 +184,9 @@ object OnionPaymentPayloadTlv {
 
   /** Only included for intermediate trampoline nodes that should wait before forwarding this payment */
   case class AsyncPayment() extends OnionPaymentPayloadTlv
+
+  /** Blinded paths to relay the payment to */
+  case class OutgoingBlindedPaths(paths: Seq[PaymentBlindedContactInfo]) extends OnionPaymentPayloadTlv
 }
 
 object PaymentOnion {
@@ -191,25 +194,25 @@ object PaymentOnion {
   import OnionPaymentPayloadTlv._
 
   /*
-   *                                              PerHopPayload
-   *                                                    |
-   *                                                    |
-   *                     +------------------------------+-----------------------------+
-   *                     |                              |                             |
-   *                     |                              |                             |
-   *            IntermediatePayload                FinalPayload          OutgoingBlindedPerHopPayload
-   *                     |                              |
-   *                     |                              |
-   *           +---------+---------+             +------+------+
-   *           |                   |             |             |
-   *           |                   |             |             |
-   *     ChannelRelay          NodeRelay      Standard      Blinded
-   *           |                   |
-   *           |                   |
-   *    +------+------+            |
-   *    |             |            |
-   *    |             |            |
-   * Standard      Blinded      Standard
+   *                                                    PerHopPayload
+   *                                                          |
+   *                                                          |
+   *                     +------------------------------------+-----------------------------+
+   *                     |                                    |                             |
+   *                     |                                    |                             |
+   *            IntermediatePayload                      FinalPayload          OutgoingBlindedPerHopPayload
+   *                     |                                    |
+   *                     |                                    |
+   *           +---------+---------+                +---------+---------+
+   *           |                   |                |                   |
+   *           |                   |                |                   |
+   *     ChannelRelay          NodeRelay    RecipientPayload   RelayToBlindedPaths
+   *           |                   |                |
+   *           |                   |                |
+   *    +------+------+            |         +------+------+
+   *    |             |            |         |             |
+   *    |             |            |         |             |
+   * Standard      Blinded      Standard  Standard      Blinded
    */
 
   /** Per-hop payload from an HTLC's payment onion (after decryption and decoding). */
@@ -322,21 +325,6 @@ object PaymentOnion {
           Right(Standard(records))
         }
 
-        /** Create a trampoline inner payload instructing the trampoline node to relay via a non-trampoline payment. */
-        // TODO: Allow sending blinded routes to trampoline nodes instead of routing hints to support BOLT12Invoice
-        def createNodeRelayToNonTrampolinePayload(amount: MilliSatoshi, totalAmount: MilliSatoshi, expiry: CltvExpiry, targetNodeId: PublicKey, invoice: Bolt11Invoice): Standard = {
-          val tlvs: Set[OnionPaymentPayloadTlv] = Set(
-            Some(AmountToForward(amount)),
-            Some(OutgoingCltv(expiry)),
-            Some(PaymentData(invoice.paymentSecret, totalAmount)),
-            invoice.paymentMetadata.map(m => PaymentMetadata(m)),
-            Some(OutgoingNodeId(targetNodeId)),
-            Some(InvoiceFeatures(invoice.features.toByteVector)),
-            Some(InvoiceRoutingInfo(invoice.routingInfo.toList.map(_.toList)))
-          ).flatten
-          Standard(TlvStream(tlvs))
-        }
-
         /** Create a standard trampoline inner payload instructing the trampoline node to wait for a trigger before sending an async payment. */
         def createNodeRelayForAsyncPayment(amount: MilliSatoshi, expiry: CltvExpiry, nextNodeId: PublicKey): Standard = {
           Standard(TlvStream(AmountToForward(amount), OutgoingCltv(expiry), OutgoingNodeId(nextNodeId), AsyncPayment()))
@@ -345,17 +333,18 @@ object PaymentOnion {
     }
   }
 
-  /** Per-hop payload for the final recipient. */
-  sealed trait FinalPayload extends PerHopPayload {
-    // @formatter:off
-    def amount: MilliSatoshi
-    def totalAmount: MilliSatoshi
-    def expiry: CltvExpiry
-    // @formatter:on
-  }
+  sealed trait FinalPayload extends PerHopPayload
 
   object FinalPayload {
-    case class Standard(records: TlvStream[OnionPaymentPayloadTlv]) extends FinalPayload {
+    /** Per-hop payload for the final recipient. */
+    sealed trait RecipientPayload extends FinalPayload {
+      def amount: MilliSatoshi
+      def totalAmount: MilliSatoshi
+      def expiry: CltvExpiry
+    }
+
+    object RecipientPayload {
+    case class Standard(records: TlvStream[OnionPaymentPayloadTlv]) extends RecipientPayload {
       override val amount = records.get[AmountToForward].get.amount
       override val totalAmount = records.get[PaymentData].map(_.totalAmount match {
         case MilliSatoshi(0) => amount
@@ -404,7 +393,7 @@ object PaymentOnion {
     /**
      * @param blindedRecords decrypted tlv stream from the encrypted_recipient_data tlv.
      */
-    case class Blinded(records: TlvStream[OnionPaymentPayloadTlv], blindedRecords: TlvStream[RouteBlindingEncryptedDataTlv]) extends FinalPayload {
+    case class Blinded(records: TlvStream[OnionPaymentPayloadTlv], blindedRecords: TlvStream[RouteBlindingEncryptedDataTlv]) extends RecipientPayload {
       override val amount = records.get[AmountToForward].get.amount
       override val totalAmount = records.get[TotalAmount].get.totalAmount
       override val expiry = records.get[OutgoingCltv].get.cltv
@@ -438,6 +427,24 @@ object PaymentOnion {
     }
   }
 
+  case class RelayToBlindedPaths(records: TlvStream[OnionPaymentPayloadTlv]) extends PerHopPayload {
+    val amountToForward = records.get[AmountToForward].get.amount
+    val outgoingCltv = records.get[OutgoingCltv].get.cltv
+    val outgoingBlindedPaths = records.get[OutgoingBlindedPaths].get.paths
+    val invoiceFeatures = records.get[InvoiceFeatures].get.features
+  }
+
+  object RelayToBlindedPaths {
+    def validate(records: TlvStream[OnionPaymentPayloadTlv]): Either[InvalidTlvPayload, RelayToBlindedPaths] = {
+      if (records.get[AmountToForward].isEmpty) return Left(MissingRequiredTlv(UInt64(2)))
+      if (records.get[OutgoingCltv].isEmpty) return Left(MissingRequiredTlv(UInt64(4)))
+      if (records.get[OutgoingBlindedPaths].isEmpty) return Left(MissingRequiredTlv(UInt64(66102)))
+      if (records.get[InvoiceFeatures].isEmpty) return Left(MissingRequiredTlv(UInt64(66097)))
+      Right(RelayToBlindedPaths(records))
+    }
+  }
+  }
+
   /**
    * An opaque blinded payload (used when sending to a blinded route, never used to decode incoming payloads).
    * We cannot use the other payload types because we cannot decrypt the recipient encrypted data, so we don't even
@@ -465,6 +472,31 @@ object PaymentOnion {
     }
   }
 
+  /** Create a trampoline inner payload instructing the trampoline node to relay via a non-trampoline payment. */
+  def createNodeRelayToNonTrampolinePayload(amount: MilliSatoshi, totalAmount: MilliSatoshi, expiry: CltvExpiry, invoice: Invoice): PerHopPayload = {
+    invoice match {
+      case invoice: Bolt11Invoice =>
+        val tlvs: Set[OnionPaymentPayloadTlv] = Set(
+          Some(AmountToForward(amount)),
+          Some(OutgoingCltv(expiry)),
+          Some(PaymentData(invoice.paymentSecret, totalAmount)),
+          invoice.paymentMetadata.map(m => PaymentMetadata(m)),
+          Some(OutgoingNodeId(invoice.nodeId)),
+          Some(InvoiceFeatures(invoice.features.toByteVector)),
+          Some(InvoiceRoutingInfo(invoice.routingInfo.toList.map(_.toList)))
+        ).flatten
+        IntermediatePayload.NodeRelay.Standard(TlvStream(tlvs))
+      case invoice: Bolt12Invoice =>
+        val tlvs: Set[OnionPaymentPayloadTlv] = Set(
+          Some(AmountToForward(amount)),
+          Some(OutgoingCltv(expiry)),
+          Some(OutgoingBlindedPaths(invoice.blindedPaths)),
+          Some(InvoiceFeatures(invoice.features.toByteVector)),
+        ).flatten
+        FinalPayload.RelayToBlindedPaths(TlvStream(tlvs))
+      case invoice => throw new Exception(s"Unexpected invoice type: ${invoice.getClass.getName}")
+    }
+  }
 }
 
 object PaymentOnionCodecs {
@@ -509,6 +541,13 @@ object PaymentOnionCodecs {
 
   private val trampolineOnion: Codec[TrampolineOnion] = tlvField(OnionRoutingCodecs.variableSizeOnionRoutingPacketCodec)
 
+  private val paymentBlindedContactInfo: Codec[PaymentBlindedContactInfo] =
+    (("route" | OfferCodecs.pathCodec) ::
+      ("paymentInfo" | OfferCodecs.paymentInfo)).as[PaymentBlindedContactInfo]
+
+  private val outgoingBlindedPaths: Codec[OutgoingBlindedPaths] =
+    tlvField(list(paymentBlindedContactInfo).xmap[Seq[PaymentBlindedContactInfo]](_.toSeq, _.toList))
+
   private val keySend: Codec[KeySend] = tlvField(bytes32)
 
   private val asyncPayment: Codec[AsyncPayment] = tlvField(provide(AsyncPayment()))
@@ -527,6 +566,7 @@ object PaymentOnionCodecs {
     .typecase(UInt64(66098), outgoingNodeId)
     .typecase(UInt64(66099), invoiceRoutingInfo)
     .typecase(UInt64(66100), trampolineOnion)
+    .typecase(UInt64(66102), outgoingBlindedPaths)
     .typecase(UInt64(181324718L), asyncPayment)
     .typecase(UInt64(5482373484L), keySend)
 

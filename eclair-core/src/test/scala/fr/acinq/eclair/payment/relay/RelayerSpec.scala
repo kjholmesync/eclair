@@ -108,7 +108,7 @@ class RelayerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("applicat
 
     val fp = paymentHandler.expectMessageType[FinalPacket]
     assert(fp.add == add_ab)
-    assert(fp.payload == FinalPayload.Standard.createPayload(finalAmount, finalAmount, finalExpiry, paymentSecret))
+    assert(fp.payload == FinalPayload.RecipientPayload.Standard.createPayload(finalAmount, finalAmount, finalExpiry, paymentSecret))
 
     register.expectNoMessage(50 millis)
   }
@@ -118,7 +118,7 @@ class RelayerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("applicat
 
     // We simulate a payment split between multiple trampoline routes.
     val totalAmount = finalAmount * 3
-    val finalTrampolinePayload = NodePayload(b, FinalPayload.Standard.createPayload(finalAmount, totalAmount, finalExpiry, paymentSecret))
+    val finalTrampolinePayload = NodePayload(b, FinalPayload.RecipientPayload.Standard.createPayload(finalAmount, totalAmount, finalExpiry, paymentSecret))
     val Right(trampolineOnion) = buildOnion(Seq(finalTrampolinePayload), paymentHash, None)
     val recipient = ClearRecipient(b, nodeParams.features.invoiceFeatures(), finalAmount, finalExpiry, randomBytes32(), nextTrampolineOnion_opt = Some(trampolineOnion.packet))
     val Right(payment) = buildOutgoingPayment(ActorRef.noSender, priv_a.privateKey, Upstream.Local(UUID.randomUUID()), paymentHash, Route(finalAmount, Seq(channelHopFromUpdate(priv_a.publicKey, b, channelUpdate_ab)), None), recipient)
@@ -129,11 +129,11 @@ class RelayerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("applicat
 
     val fp = paymentHandler.expectMessageType[FinalPacket]
     assert(fp.add == add_ab)
-    assert(fp.payload.isInstanceOf[FinalPayload.Standard])
+    assert(fp.payload.isInstanceOf[FinalPayload.RecipientPayload.Standard])
     assert(fp.payload.amount == finalAmount)
     assert(fp.payload.totalAmount == totalAmount)
     assert(fp.payload.expiry == finalExpiry)
-    assert(fp.payload.asInstanceOf[FinalPayload.Standard].paymentSecret == paymentSecret)
+    assert(fp.payload.asInstanceOf[FinalPayload.RecipientPayload.Standard].paymentSecret == paymentSecret)
 
     register.expectNoMessage(50 millis)
   }

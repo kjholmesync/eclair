@@ -61,7 +61,7 @@ object OfferManager {
 
   case class RequestInvoice(messagePayload: MessageOnion.InvoiceRequestPayload, postman: ActorRef[Postman.SendMessage]) extends Command
 
-  case class ReceivePayment(replyTo: ActorRef[MultiPartHandler.GetIncomingPaymentActor.Command], paymentHash: ByteVector32, payload: FinalPayload.Blinded) extends Command
+  case class ReceivePayment(replyTo: ActorRef[MultiPartHandler.GetIncomingPaymentActor.Command], paymentHash: ByteVector32, payload: FinalPayload.RecipientPayload.Blinded) extends Command
 
   /**
    * Offer handlers must be implemented in separate plugins and respond to these two `HandlerCommand`.
