@@ -432,19 +432,9 @@ private[channel] object ChannelCodecs4 {
       ("sig" | lengthDelimited(commitSigCodec)) ::
         ("commit" | remoteCommitCodec(commitmentSpecCodec))).as[NextRemoteCommit]
 
-    private def commitmentCodecWithoutFirstRemoteCommitIndex(htlcs: Set[DirectedHtlc]): Codec[Commitment] = (
+    private def commitmentCodec(htlcs: Set[DirectedHtlc], hasFirstCommitmentIndex: Boolean): Codec[Commitment] = (
       ("fundingTxIndex" | uint32) ::
-        ("firstRemoteCommitIndex" | provide(0L)) ::
-        ("fundingPubKey" | publicKey) ::
-        ("fundingTxStatus" | fundingTxStatusCodec) ::
-        ("remoteFundingStatus" | remoteFundingStatusCodec) ::
-        ("localCommit" | localCommitCodec(minimalCommitmentSpecCodec(htlcs))) ::
-        ("remoteCommit" | remoteCommitCodec(minimalCommitmentSpecCodec(htlcs.map(_.opposite)))) ::
-        ("nextRemoteCommit_opt" | optional(bool8, nextRemoteCommitCodec(minimalCommitmentSpecCodec(htlcs.map(_.opposite)))))).as[Commitment]
-
-    private def commitmentCodec(htlcs: Set[DirectedHtlc]): Codec[Commitment] = (
-      ("fundingTxIndex" | uint32) ::
-        ("firstRemoteCommitIndex" | uint64overflow) ::
+        ("firstRemoteCommitIndex" | withDefault(conditional(hasFirstCommitmentIndex, uint64overflow), provide(0L))) ::
         ("fundingPubKey" | publicKey) ::
         ("fundingTxStatus" | fundingTxStatusCodec) ::
         ("remoteFundingStatus" | remoteFundingStatusCodec) ::
@@ -505,27 +495,12 @@ private[channel] object ChannelCodecs4 {
       }
     }
 
-    val commitmentsCodecWithoutFirstRemoteCommitIndex: Codec[Commitments] = (
+    def commitmentsCodec(hasFirstCommitmentIndex: Boolean): Codec[Commitments] = (
       ("params" | paramsCodec) ::
         ("changes" | changesCodec) ::
         (("htlcs" | setCodec(htlcCodec)) >>:~ { htlcs =>
-          ("active" | listOfN(uint16, commitmentCodecWithoutFirstRemoteCommitIndex(htlcs))) ::
-            ("inactive" | listOfN(uint16, commitmentCodecWithoutFirstRemoteCommitIndex(htlcs))) ::
-            ("remoteNextCommitInfo" | either(bool8, waitForRevCodec, publicKey)) ::
-            ("remotePerCommitmentSecrets" | byteAligned(ShaChain.shaChainCodec)) ::
-            ("originChannels" | originsMapCodec) ::
-            ("remoteChannelData_opt" | optional(bool8, varsizebinarydata))
-        })).as[EncodedCommitments].xmap(
-      encoded => encoded.toCommitments,
-      commitments => EncodedCommitments(commitments)
-    )
-
-    val commitmentsCodec: Codec[Commitments] = (
-      ("params" | paramsCodec) ::
-        ("changes" | changesCodec) ::
-        (("htlcs" | setCodec(htlcCodec)) >>:~ { htlcs =>
-          ("active" | listOfN(uint16, commitmentCodec(htlcs))) ::
-            ("inactive" | listOfN(uint16, commitmentCodec(htlcs))) ::
+          ("active" | listOfN(uint16, commitmentCodec(htlcs, hasFirstCommitmentIndex = hasFirstCommitmentIndex))) ::
+            ("inactive" | listOfN(uint16, commitmentCodec(htlcs, hasFirstCommitmentIndex = hasFirstCommitmentIndex))) ::
             ("remoteNextCommitInfo" | either(bool8, waitForRevCodec, publicKey)) ::
             ("remotePerCommitmentSecrets" | byteAligned(ShaChain.shaChainCodec)) ::
             ("originChannels" | originsMapCodec) ::
@@ -536,7 +511,7 @@ private[channel] object ChannelCodecs4 {
     )
 
     val versionedCommitmentsCodec: Codec[Commitments] = discriminated[Commitments].by(uint8)
-      .typecase(0x01, commitmentsCodec)
+      .typecase(0x01, commitmentsCodec(hasFirstCommitmentIndex = true))
 
     val closingFeeratesCodec: Codec[ClosingFeerates] = (
       ("preferred" | feeratePerKw) ::
@@ -598,7 +573,7 @@ private[channel] object ChannelCodecs4 {
       .\(0x02) { case status: SpliceStatus.SpliceWaitingForSigs => status }(interactiveTxWaitingForSigsCodec.as[channel.SpliceStatus.SpliceWaitingForSigs])
 
     val DATA_WAIT_FOR_FUNDING_CONFIRMED_00_Codec: Codec[DATA_WAIT_FOR_FUNDING_CONFIRMED] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("waitingSince" | blockHeight) ::
         ("deferred" | optional(bool8, lengthDelimited(channelReadyCodec))) ::
         ("lastSent" | either(bool8, lengthDelimited(fundingCreatedCodec), lengthDelimited(fundingSignedCodec)))).as[DATA_WAIT_FOR_FUNDING_CONFIRMED]
@@ -610,7 +585,7 @@ private[channel] object ChannelCodecs4 {
         ("lastSent" | either(bool8, lengthDelimited(fundingCreatedCodec), lengthDelimited(fundingSignedCodec)))).as[DATA_WAIT_FOR_FUNDING_CONFIRMED]
 
     val DATA_WAIT_FOR_CHANNEL_READY_01_Codec: Codec[DATA_WAIT_FOR_CHANNEL_READY] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("shortIds" | shortids)).as[DATA_WAIT_FOR_CHANNEL_READY]
 
     val DATA_WAIT_FOR_CHANNEL_READY_0b_Codec: Codec[DATA_WAIT_FOR_CHANNEL_READY] = (
@@ -626,7 +601,7 @@ private[channel] object ChannelCodecs4 {
         ("remoteChannelData_opt" | optional(bool8, varsizebinarydata))).as[DATA_WAIT_FOR_DUAL_FUNDING_SIGNED]
 
     val DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED_02_Codec: Codec[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("localPushAmount" | millisatoshi) ::
         ("remotePushAmount" | millisatoshi) ::
         ("waitingSince" | blockHeight) ::
@@ -644,7 +619,7 @@ private[channel] object ChannelCodecs4 {
         ("deferred" | optional(bool8, lengthDelimited(channelReadyCodec)))).as[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED]
 
     val DATA_WAIT_FOR_DUAL_FUNDING_READY_03_Codec: Codec[DATA_WAIT_FOR_DUAL_FUNDING_READY] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("shortIds" | shortids)).as[DATA_WAIT_FOR_DUAL_FUNDING_READY]
 
     val DATA_WAIT_FOR_DUAL_FUNDING_READY_0d_Codec: Codec[DATA_WAIT_FOR_DUAL_FUNDING_READY] = (
@@ -652,7 +627,7 @@ private[channel] object ChannelCodecs4 {
         ("shortIds" | shortids)).as[DATA_WAIT_FOR_DUAL_FUNDING_READY]
 
     val DATA_NORMAL_04_Codec: Codec[DATA_NORMAL] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("shortids" | shortids) ::
         ("channelAnnouncement" | optional(bool8, lengthDelimited(channelAnnouncementCodec))) ::
         ("channelUpdate" | lengthDelimited(channelUpdateCodec)) ::
@@ -672,7 +647,7 @@ private[channel] object ChannelCodecs4 {
         ("spliceStatus" | spliceStatusCodec)).as[DATA_NORMAL]
 
     val DATA_SHUTDOWN_05_Codec: Codec[DATA_SHUTDOWN] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("localShutdown" | lengthDelimited(shutdownCodec)) ::
         ("remoteShutdown" | lengthDelimited(shutdownCodec)) ::
         ("closingFeerates" | optional(bool8, closingFeeratesCodec))).as[DATA_SHUTDOWN]
@@ -684,7 +659,7 @@ private[channel] object ChannelCodecs4 {
         ("closingFeerates" | optional(bool8, closingFeeratesCodec))).as[DATA_SHUTDOWN]
 
     val DATA_NEGOTIATING_06_Codec: Codec[DATA_NEGOTIATING] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("localShutdown" | lengthDelimited(shutdownCodec)) ::
         ("remoteShutdown" | lengthDelimited(shutdownCodec)) ::
         ("closingTxProposed" | listOfN(uint16, listOfN(uint16, lengthDelimited(closingTxProposedCodec)))) ::
@@ -698,7 +673,7 @@ private[channel] object ChannelCodecs4 {
         ("bestUnpublishedClosingTx_opt" | optional(bool8, closingTxCodec))).as[DATA_NEGOTIATING]
 
     val DATA_CLOSING_07_Codec: Codec[DATA_CLOSING] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("waitingSince" | blockHeight) ::
         ("finalScriptPubKey" | lengthDelimited(bytes)) ::
         ("mutualCloseProposed" | listOfN(uint16, closingTxCodec)) ::
@@ -722,7 +697,7 @@ private[channel] object ChannelCodecs4 {
         ("revokedCommitPublished" | listOfN(uint16, revokedCommitPublishedCodec))).as[DATA_CLOSING]
 
     val DATA_WAIT_FOR_REMOTE_PUBLISH_FUTURE_COMMITMENT_08_Codec: Codec[DATA_WAIT_FOR_REMOTE_PUBLISH_FUTURE_COMMITMENT] = (
-      ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
+      ("commitments" | commitmentsCodec(hasFirstCommitmentIndex = false)) ::
         ("remoteChannelReestablish" | channelReestablishCodec)).as[DATA_WAIT_FOR_REMOTE_PUBLISH_FUTURE_COMMITMENT]
 
     val DATA_WAIT_FOR_REMOTE_PUBLISH_FUTURE_COMMITMENT_12_Codec: Codec[DATA_WAIT_FOR_REMOTE_PUBLISH_FUTURE_COMMITMENT] = (
