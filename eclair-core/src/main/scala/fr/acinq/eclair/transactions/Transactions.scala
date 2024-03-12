@@ -19,7 +19,8 @@ package fr.acinq.eclair.transactions
 import fr.acinq.bitcoin.ScriptFlags
 import fr.acinq.bitcoin.SigHash._
 import fr.acinq.bitcoin.SigVersion._
-import fr.acinq.bitcoin.scalacompat.Crypto.{PrivateKey, PublicKey, ripemd160}
+import fr.acinq.bitcoin.crypto.musig2.{IndividualNonce, SecretNonce}
+import fr.acinq.bitcoin.scalacompat.Crypto.{PrivateKey, PublicKey, XonlyPublicKey, ripemd160}
 import fr.acinq.bitcoin.scalacompat.Script._
 import fr.acinq.bitcoin.scalacompat._
 import fr.acinq.eclair._
@@ -38,6 +39,7 @@ import scala.util.Try
 object Transactions {
 
   val MAX_STANDARD_TX_WEIGHT = 400_000
+  val NUMS_POINT = PublicKey(ByteVector.fromValidHex("02dca094751109d0bd055d03565874e8276dd53e926b44e3bd1bb6bf4bc130a279"))
 
   sealed trait CommitmentFormat {
     // @formatter:off
@@ -92,6 +94,11 @@ object Transactions {
    */
   case object ZeroFeeHtlcTxAnchorOutputsCommitmentFormat extends AnchorOutputsCommitmentFormat
 
+  case object SimpleTaprootChannelsStagingCommitmentFormat extends AnchorOutputsCommitmentFormat {
+    override val commitWeight = 968
+  }
+
+
   // @formatter:off
   case class OutputInfo(index: Long, amount: Satoshi, publicKeyScript: ByteVector)
   case class InputInfo(outPoint: OutPoint, txOut: TxOut, redeemScript: ByteVector)
@@ -117,7 +124,10 @@ object Transactions {
       Satoshi(FeeratePerKw.MinimumRelayFeeRate * vsize / 1000)
     }
     /** Sighash flags to use when signing the transaction. */
-    def sighash(txOwner: TxOwner, commitmentFormat: CommitmentFormat): Int = SIGHASH_ALL
+   def sighash(txOwner: TxOwner, commitmentFormat: CommitmentFormat): Int = commitmentFormat match {
+      case SimpleTaprootChannelsStagingCommitmentFormat => SIGHASH_DEFAULT
+      case _ => SIGHASH_ALL
+    }
 
     def sign(key: PrivateKey, txOwner: TxOwner, commitmentFormat: CommitmentFormat): ByteVector64 = Transactions.sign(this, key, sighash(txOwner, commitmentFormat))
 
@@ -401,6 +411,7 @@ object Transactions {
                           remoteFundingPubkey: PublicKey,
                           spec: CommitmentSpec,
                           commitmentFormat: CommitmentFormat): CommitmentOutputs = {
+
     val outputs = collection.mutable.ArrayBuffer.empty[CommitmentOutputLink[CommitmentOutput]]
 
     trimOfferedHtlcs(localDustLimit, spec, commitmentFormat).foreach { htlc =>
@@ -422,14 +433,28 @@ object Transactions {
     } // NB: we don't care if values are < 0, they will be trimmed if they are < dust limit anyway
 
     if (toLocalAmount >= localDustLimit) {
-      outputs.append(CommitmentOutputLink(
-        TxOut(toLocalAmount, pay2wsh(toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey))),
-        toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey),
-        ToLocal))
+      commitmentFormat match {
+        case SimpleTaprootChannelsStagingCommitmentFormat =>
+          val toLocalScriptTree = Scripts.toLocalScriptTree(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey)
+          outputs.append(CommitmentOutputLink(
+            TxOut(toLocalAmount, pay2tr(XonlyPublicKey(NUMS_POINT), Some(toLocalScriptTree))),
+            taprootToDelayScript(localDelayedPaymentPubkey, toLocalDelay),
+            ToLocal))
+        case _ => outputs.append(CommitmentOutputLink(
+          TxOut(toLocalAmount, pay2wsh(toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey))),
+          toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey),
+          ToLocal))
+      }
     }
 
     if (toRemoteAmount >= localDustLimit) {
       commitmentFormat match {
+        case SimpleTaprootChannelsStagingCommitmentFormat =>
+          val toRemoteScriptTree = Scripts.toRemoteScriptTree(remotePaymentPubkey)
+          outputs.append(CommitmentOutputLink(
+            TxOut(toRemoteAmount, pay2tr(XonlyPublicKey(NUMS_POINT), Some(toRemoteScriptTree))),
+            taprootToRemoteScript(remotePaymentPubkey),
+            ToRemote))
         case DefaultCommitmentFormat => outputs.append(CommitmentOutputLink(
           TxOut(toRemoteAmount, pay2wpkh(remotePaymentPubkey)),
           pay2pkh(remotePaymentPubkey),
@@ -442,6 +467,13 @@ object Transactions {
     }
 
     commitmentFormat match {
+      case SimpleTaprootChannelsStagingCommitmentFormat =>
+        if (toLocalAmount >= localDustLimit || hasHtlcs) {
+          outputs.append(CommitmentOutputLink(TxOut(AnchorOutputsCommitmentFormat.anchorAmount, pay2tr(localDelayedPaymentPubkey.xOnly, Some(taprootAnchorScriptTree))), taprootAnchorScript, ToLocalAnchor))
+        }
+        if (toRemoteAmount >= localDustLimit || hasHtlcs) {
+          outputs.append(CommitmentOutputLink(TxOut(AnchorOutputsCommitmentFormat.anchorAmount, pay2tr(remotePaymentPubkey.xOnly, Some(taprootAnchorScriptTree))), taprootAnchorScript, ToRemoteAnchor))
+        }
       case _: AnchorOutputsCommitmentFormat =>
         if (toLocalAmount >= localDustLimit || hasHtlcs) {
           outputs.append(CommitmentOutputLink(TxOut(AnchorOutputsCommitmentFormat.anchorAmount, pay2wsh(anchor(localFundingPubkey))), anchor(localFundingPubkey), ToLocalAnchor))
@@ -670,21 +702,57 @@ object Transactions {
     }
   }
 
-  def makeHtlcDelayedTx(htlcTx: Transaction, localDustLimit: Satoshi, localRevocationPubkey: PublicKey, toLocalDelay: CltvExpiryDelta, localDelayedPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw): Either[TxGenerationSkipped, HtlcDelayedTx] = {
-    makeLocalDelayedOutputTx(htlcTx, localDustLimit, localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey, localFinalScriptPubKey, feeratePerKw).map {
+  def makeClaimRemoteDelayedOutputTxTaproot(commitTx: Transaction, localDustLimit: Satoshi, localPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw): Either[TxGenerationSkipped, ClaimRemoteDelayedOutputTx] = {
+    val (toRemoteKey, _) = Scripts.toRemoteKey(localPaymentPubkey)
+    val pubkeyScript = write(pay2tr(toRemoteKey))
+    findPubKeyScriptIndex(commitTx, pubkeyScript) match {
+      case Left(skip) => Left(skip)
+      case Right(outputIndex) =>
+        val input = InputInfo(OutPoint(commitTx, outputIndex), commitTx.txOut(outputIndex), write(Scripts.taprootToRemoteScript(localPaymentPubkey)))
+        // unsigned transaction
+        val tx = Transaction(
+          version = 2,
+          txIn = TxIn(input.outPoint, ByteVector.empty, 1) :: Nil,
+          txOut = TxOut(Satoshi(0), localFinalScriptPubKey) :: Nil,
+          lockTime = 0)
+        // compute weight with a dummy 73 bytes signature (the largest you can get)
+        val weight = addAggregatedSignature(ClaimRemoteDelayedOutputTx(input, tx), PlaceHolderSig).tx.weight()
+        val fee = weight2fee(feeratePerKw, weight)
+        val amount = input.txOut.amount - fee
+        if (amount < localDustLimit) {
+          Left(AmountBelowDustLimit)
+        } else {
+          val tx1 = tx.copy(txOut = tx.txOut.head.copy(amount = amount) :: Nil)
+          Right(ClaimRemoteDelayedOutputTx(input, tx1))
+        }
+    }
+  }
+
+  def makeHtlcDelayedTx(htlcTx: Transaction, localDustLimit: Satoshi, localRevocationPubkey: PublicKey, toLocalDelay: CltvExpiryDelta, localDelayedPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw, commitmentFormat: CommitmentFormat): Either[TxGenerationSkipped, HtlcDelayedTx] = {
+    makeLocalDelayedOutputTx(htlcTx, localDustLimit, localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey, localFinalScriptPubKey, feeratePerKw, commitmentFormat).map {
       case (input, tx) => HtlcDelayedTx(input, tx)
     }
   }
 
-  def makeClaimLocalDelayedOutputTx(commitTx: Transaction, localDustLimit: Satoshi, localRevocationPubkey: PublicKey, toLocalDelay: CltvExpiryDelta, localDelayedPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw): Either[TxGenerationSkipped, ClaimLocalDelayedOutputTx] = {
-    makeLocalDelayedOutputTx(commitTx, localDustLimit, localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey, localFinalScriptPubKey, feeratePerKw).map {
+  def makeClaimLocalDelayedOutputTx(commitTx: Transaction, localDustLimit: Satoshi, localRevocationPubkey: PublicKey, toLocalDelay: CltvExpiryDelta, localDelayedPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw, commitmentFormat: CommitmentFormat): Either[TxGenerationSkipped, ClaimLocalDelayedOutputTx] = {
+    makeLocalDelayedOutputTx(commitTx, localDustLimit, localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey, localFinalScriptPubKey, feeratePerKw, commitmentFormat).map {
       case (input, tx) => ClaimLocalDelayedOutputTx(input, tx)
     }
   }
 
-  private def makeLocalDelayedOutputTx(parentTx: Transaction, localDustLimit: Satoshi, localRevocationPubkey: PublicKey, toLocalDelay: CltvExpiryDelta, localDelayedPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw): Either[TxGenerationSkipped, (InputInfo, Transaction)] = {
-    val redeemScript = toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey)
-    val pubkeyScript = write(pay2wsh(redeemScript))
+  private def makeLocalDelayedOutputTx(parentTx: Transaction, localDustLimit: Satoshi, localRevocationPubkey: PublicKey, toLocalDelay: CltvExpiryDelta, localDelayedPaymentPubkey: PublicKey, localFinalScriptPubKey: ByteVector, feeratePerKw: FeeratePerKw, commitmentFormat: CommitmentFormat): Either[TxGenerationSkipped, (InputInfo, Transaction)] = {
+    val redeemScript = commitmentFormat match {
+      case SimpleTaprootChannelsStagingCommitmentFormat => Scripts.taprootToDelayScript(localDelayedPaymentPubkey, toLocalDelay)
+      case _ => toLocalDelayed(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey)
+    }
+    val pubkeyScript = commitmentFormat match {
+      case SimpleTaprootChannelsStagingCommitmentFormat =>
+        val (toLocalKey, _) = Scripts.toLocalKey(localRevocationPubkey, toLocalDelay, localDelayedPaymentPubkey)
+        write(pay2tr(toLocalKey))
+      case _ =>
+        write(pay2wsh(redeemScript))
+    }
+
     findPubKeyScriptIndex(parentTx, pubkeyScript) match {
       case Left(skip) => Left(skip)
       case Right(outputIndex) =>
@@ -696,7 +764,10 @@ object Transactions {
           txOut = TxOut(Satoshi(0), localFinalScriptPubKey) :: Nil,
           lockTime = 0)
         // compute weight with a dummy 73 bytes signature (the largest you can get)
-        val weight = addSigs(ClaimLocalDelayedOutputTx(input, tx), PlaceHolderSig).tx.weight()
+        val weight = commitmentFormat match {
+          case SimpleTaprootChannelsStagingCommitmentFormat => addAggregatedSignature(ClaimLocalDelayedOutputTx(input, tx), PlaceHolderSig).tx.weight()
+          case _ => addSigs(ClaimLocalDelayedOutputTx(input, tx), PlaceHolderSig).tx.weight()
+        }
         val fee = weight2fee(feeratePerKw, weight)
         val amount = input.txOut.amount - fee
         if (amount < localDustLimit) {
@@ -809,7 +880,7 @@ object Transactions {
     }
   }
 
-  def makeClosingTx(commitTxInput: InputInfo, localScriptPubKey: ByteVector, remoteScriptPubKey: ByteVector, localPaysClosingFees: Boolean, dustLimit: Satoshi, closingFee: Satoshi, spec: CommitmentSpec): ClosingTx = {
+  def makeClosingTx(commitTxInput: InputInfo, localScriptPubKey: ByteVector, remoteScriptPubKey: ByteVector, localPaysClosingFees: Boolean, dustLimit: Satoshi, closingFee: Satoshi, spec: CommitmentSpec, sequence: Long = 0xffffffffL): ClosingTx = {
     require(spec.htlcs.isEmpty, "there shouldn't be any pending htlcs")
 
     val (toLocalAmount: Satoshi, toRemoteAmount: Satoshi) = if (localPaysClosingFees) {
@@ -823,7 +894,7 @@ object Transactions {
 
     val tx = LexicographicalOrdering.sort(Transaction(
       version = 2,
-      txIn = TxIn(commitTxInput.outPoint, ByteVector.empty, sequence = 0xffffffffL) :: Nil,
+      txIn = TxIn(commitTxInput.outPoint, ByteVector.empty, sequence) :: Nil,
       txOut = toLocalOutput_opt.toSeq ++ toRemoteOutput_opt.toSeq ++ Nil,
       lockTime = 0))
     val toLocalOutput = findPubKeyScriptIndex(tx, localScriptPubKey).map(index => OutputInfo(index, toLocalAmount, localScriptPubKey)).toOption
@@ -873,6 +944,28 @@ object Transactions {
     // signature will be invalidated if other inputs are added *afterwards* and sighashType was SIGHASH_ALL.
     val inputIndex = txinfo.tx.txIn.zipWithIndex.find(_._1.outPoint == txinfo.input.outPoint).get._2
     sign(txinfo.tx, txinfo.input.redeemScript, txinfo.input.txOut.amount, key, sighashType, inputIndex)
+  }
+
+  private def sign(txinfo: TransactionWithInputInfo, key: PrivateKey, txOwner: TxOwner, commitmentFormat: CommitmentFormat): ByteVector64 = sign(txinfo, key, txinfo.sighash(txOwner, commitmentFormat))
+
+  def partialSign(txinfo: TransactionWithInputInfo, key: PrivateKey,
+                  localFundingPublicKey: PublicKey, remoteFundingPublicKey: PublicKey,
+                  localNonce: (SecretNonce, IndividualNonce), remoteNextLocalNonce: IndividualNonce): Either[Throwable, ByteVector32] = {
+    val inputIndex = txinfo.tx.txIn.indexWhere(_.outPoint == txinfo.input.outPoint)
+    val publicKeys = Scripts.sort(Seq(localFundingPublicKey, remoteFundingPublicKey))
+    Musig2.signTaprootInput(key, txinfo.tx, inputIndex, Seq(txinfo.input.txOut), publicKeys, localNonce._1, Seq(localNonce._2, remoteNextLocalNonce), None)
+  }
+
+  def aggregatePartialSignatures(txinfo: TransactionWithInputInfo,
+                                 localSig: ByteVector32, remoteSig: ByteVector32,
+                                 localFundingPublicKey: PublicKey, remoteFundingPublicKey: PublicKey,
+                                 localNonce: IndividualNonce, remoteNonce: IndividualNonce): Either[Throwable, ByteVector64] = {
+    Musig2.aggregateTaprootSignatures(
+      Seq(localSig, remoteSig), txinfo.tx, txinfo.tx.txIn.indexWhere(_.outPoint == txinfo.input.outPoint),
+      Seq(txinfo.input.txOut),
+      Scripts.sort(Seq(localFundingPublicKey, remoteFundingPublicKey)),
+      Seq(localNonce, remoteNonce),
+      None)
   }
 
   def addSigs(commitTx: CommitTx, localFundingPubkey: PublicKey, remoteFundingPubkey: PublicKey, localSig: ByteVector64, remoteSig: ByteVector64): CommitTx = {
@@ -943,6 +1036,22 @@ object Transactions {
   def addSigs(closingTx: ClosingTx, localFundingPubkey: PublicKey, remoteFundingPubkey: PublicKey, localSig: ByteVector64, remoteSig: ByteVector64): ClosingTx = {
     val witness = Scripts.witness2of2(localSig, remoteSig, localFundingPubkey, remoteFundingPubkey)
     closingTx.copy(tx = closingTx.tx.updateWitness(0, witness))
+  }
+
+  def addAggregatedSignature(commitTx: CommitTx, aggregatedSignature: ByteVector64): CommitTx = {
+    commitTx.copy(tx = commitTx.tx.updateWitness(0, Script.witnessKeyPathPay2tr(aggregatedSignature)))
+  }
+
+  def addAggregatedSignature(claimLocalDelayedOutputTx: ClaimLocalDelayedOutputTx, aggregatedSignature: ByteVector64): ClaimLocalDelayedOutputTx = {
+    claimLocalDelayedOutputTx.copy(tx = claimLocalDelayedOutputTx.tx.updateWitness(0, Script.witnessKeyPathPay2tr(aggregatedSignature)))
+  }
+
+  def addAggregatedSignature(claimRemoteDelayedOutputTx: ClaimRemoteDelayedOutputTx, aggregatedSignature: ByteVector64): ClaimRemoteDelayedOutputTx = {
+    claimRemoteDelayedOutputTx.copy(tx = claimRemoteDelayedOutputTx.tx.updateWitness(0, Script.witnessKeyPathPay2tr(aggregatedSignature)))
+  }
+
+  def addAggregatedSignature(closingTx: ClosingTx, aggregatedSignature: ByteVector64): ClosingTx = {
+    closingTx.copy(tx = closingTx.tx.updateWitness(0, Script.witnessKeyPathPay2tr(aggregatedSignature)))
   }
 
   def checkSpendable(txinfo: TransactionWithInputInfo): Try[Unit] = {
