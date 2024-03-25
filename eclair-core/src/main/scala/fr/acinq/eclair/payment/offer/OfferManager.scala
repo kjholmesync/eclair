@@ -106,10 +106,16 @@ object OfferManager {
           normal(registeredOffers - offer.offerId)
         case RequestInvoice(messagePayload, postman) =>
           registeredOffers.get(messagePayload.invoiceRequest.offer.offerId) match {
-            case Some(registered) if registered.pathId_opt.map(_.bytes) == messagePayload.pathId_opt && messagePayload.invoiceRequest.isValid =>
-              val child = context.spawnAnonymous(InvoiceRequestActor(nodeParams, messagePayload.invoiceRequest, registered.handler, registered.nodeKey, router, messagePayload.replyPath, postman))
-              child ! InvoiceRequestActor.RequestInvoice
-            case _ => context.log.debug("offer {} is not registered or invoice request is invalid", messagePayload.invoiceRequest.offer.offerId)
+            case Some(registered) =>
+              if (registered.pathId_opt.map(_.bytes) != messagePayload.pathId_opt) {
+                context.log.debug("offer {} expects pathId {} but got {}", messagePayload.invoiceRequest.offer, registered.pathId_opt.map(_.bytes), messagePayload.pathId_opt)
+              } else if (!messagePayload.invoiceRequest.isValid) {
+                context.log.debug("invoice request {} is invalid", messagePayload.invoiceRequest)
+              } else {
+                val child = context.spawnAnonymous(InvoiceRequestActor(nodeParams, messagePayload.invoiceRequest, registered.handler, registered.nodeKey, router, messagePayload.replyPath, postman))
+                child ! InvoiceRequestActor.RequestInvoice
+              }
+            case _ => context.log.debug("offer {} is not registered", messagePayload.invoiceRequest.offer)
           }
           Behaviors.same
         case ReceivePayment(replyTo, paymentHash, payload) =>
