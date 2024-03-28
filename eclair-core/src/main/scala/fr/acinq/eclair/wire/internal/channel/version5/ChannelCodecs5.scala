@@ -110,11 +110,30 @@ private[channel] object ChannelCodecs5 {
 
     val txCodec: Codec[Transaction] = lengthDelimited(bytes.xmap(d => Transaction.read(d.toArray), d => Transaction.write(d)))
 
+    def scriptTreeAndInternalKey: Codec[ScriptTreeAndInternalKey] = {
+      import fr.acinq.bitcoin.scalacompat.KotlinUtils._
+      import shapeless.{::, HNil}
+
+      val leafCodec: Codec[ScriptTree.Leaf] = (int32 :: varsizebinarydata :: int32).xmap[ScriptTree.Leaf]({
+        case a :: b :: c :: HNil => new ScriptTree.Leaf(a, scala2kmp(b), c)
+      }, {
+        l => l.getId :: kmp2scala(l.getScript) :: l.getLeafVersion :: HNil
+      })
+
+      def scriptTreeCodec: Codec[ScriptTree] = lazily {
+        discriminated[ScriptTree].by(bool8)
+          .typecase(false, leafCodec)
+          .typecase(true, (scriptTreeCodec ~ scriptTreeCodec).xmap[ScriptTree.Branch]({ a => new ScriptTree.Branch(a._1, a._2) }, { n: ScriptTree.Branch => n.getLeft -> n.getRight }))
+      }
+
+      (scriptTreeCodec :: xonlyPublicKey).as[ScriptTreeAndInternalKey]
+    }
+
     val inputInfoCodec: Codec[InputInfo] = (
       ("outPoint" | outPointCodec) ::
         ("txOut" | txOutCodec) ::
         ("redeemScript" | lengthDelimited(bytes)) ::
-        ("scriptTee_opt" | provide(Option.empty[ScriptTree]))).as[InputInfo] //TODO: serialise script tree properly
+        ("scriptTee_opt" | optional(bool8, scriptTreeAndInternalKey))).as[InputInfo]
 
     val outputInfoCodec: Codec[OutputInfo] = (
       ("index" | uint32) ::

@@ -104,9 +104,15 @@ class LocalChannelKeyManager(seed: ByteVector, chainHash: BlockHash) extends Cha
 
   override def commitmentPoint(channelKeyPath: DeterministicWallet.KeyPath, index: Long): PublicKey = Generators.perCommitPoint(shaSeed(channelKeyPath), index)
 
-  override def commitmentNonce(fundingKeyPath: KeyPath, fundingTxIndex: Long, channelKeyPath: KeyPath, index: Long): (SecretNonce, IndividualNonce) = {
+  override def verificationNonce(fundingKeyPath: KeyPath, fundingTxIndex: Long, channelKeyPath: KeyPath, index: Long): (SecretNonce, IndividualNonce) = {
     val fundingPrivateKey = privateKeys.get(internalKeyPath(fundingKeyPath, hardened(fundingTxIndex)))
     val sessionId = Generators.perCommitSecret(nonceSeed(channelKeyPath), index).value
+    Musig2.generateNonce(sessionId, fundingPrivateKey.privateKey, Seq(fundingPrivateKey.publicKey))
+  }
+
+  override def signingNonce(fundingKeyPath: KeyPath, fundingTxIndex: Long): (SecretNonce, IndividualNonce) = {
+    val fundingPrivateKey = privateKeys.get(internalKeyPath(fundingKeyPath, hardened(fundingTxIndex)))
+    val sessionId = randomBytes32()
     Musig2.generateNonce(sessionId, fundingPrivateKey.privateKey, Seq(fundingPrivateKey.publicKey))
   }
 

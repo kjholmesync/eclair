@@ -16,6 +16,7 @@
 
 package fr.acinq.eclair.wire.protocol
 
+import fr.acinq.bitcoin.crypto.musig2.IndividualNonce
 import fr.acinq.bitcoin.scalacompat.Crypto.PublicKey
 import fr.acinq.eclair.UInt64
 import fr.acinq.eclair.channel.PartialSignatureWithNonce
@@ -84,5 +85,13 @@ object CommitSigTlv {
 sealed trait RevokeAndAckTlv extends Tlv
 
 object RevokeAndAckTlv {
-  val revokeAndAckTlvCodec: Codec[TlvStream[RevokeAndAckTlv]] = tlvStream(discriminated[RevokeAndAckTlv].by(varint))
+  case class NextLocalNonceTlv(nonce: IndividualNonce) extends RevokeAndAckTlv
+
+  object NextLocalNonceTlv {
+    val codec: Codec[NextLocalNonceTlv] = tlvField(publicNonce)
+  }
+
+  val revokeAndAckTlvCodec: Codec[TlvStream[RevokeAndAckTlv]] = tlvStream(discriminated[RevokeAndAckTlv].by(varint)
+    .typecase(UInt64(4), NextLocalNonceTlv.codec)
+  )
 }

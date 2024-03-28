@@ -119,7 +119,7 @@ trait CommonFundingHandlers extends CommonHandlers {
     val tlvStream: TlvStream[ChannelReadyTlv] = params.commitmentFormat match {
       case SimpleTaprootChannelsStagingCommitmentFormat =>
         // TODO: fundingTxIndex = 0 ?
-        val (_, nextLocalNonce) = keyManager.commitmentNonce(params.localParams.fundingKeyPath, fundingTxIndex = 0, channelKeyPath, 1)
+        val (_, nextLocalNonce) = keyManager.verificationNonce(params.localParams.fundingKeyPath, fundingTxIndex = 0, channelKeyPath, 1)
         TlvStream(ChannelReadyTlv.ShortChannelIdTlv(shortIds.localAlias), ChannelTlv.NextLocalNonceTlv(nextLocalNonce))
       case _ =>
         TlvStream(ChannelReadyTlv.ShortChannelIdTlv(shortIds.localAlias))

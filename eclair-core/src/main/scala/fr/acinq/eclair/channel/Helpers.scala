@@ -18,7 +18,7 @@ package fr.acinq.eclair.channel
 
 import akka.event.{DiagnosticLoggingAdapter, LoggingAdapter}
 import com.softwaremill.quicklens.ModifyPimp
-import fr.acinq.bitcoin.ScriptFlags
+import fr.acinq.bitcoin.{ScriptFlags, ScriptTree}
 import fr.acinq.bitcoin.crypto.musig2.{IndividualNonce, SecretNonce}
 import fr.acinq.bitcoin.scalacompat.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin.scalacompat.Script._
@@ -851,7 +851,7 @@ object Helpers {
           val localPaymentKey = commitment.params.commitmentFormat match {
             case SimpleTaprootChannelsStagingCommitmentFormat =>
               val channelKeyPath = keyManager.keyPath(commitment.localParams, commitment.params.channelConfig)
-              val localPerCommitmentPoint = keyManager.commitmentPoint(channelKeyPath, commitment.localCommit.index + 1)
+              val localPerCommitmentPoint = keyManager.commitmentPoint(channelKeyPath, commitment.localCommit.index)
               val localDelayedPaymentPubkey = Generators.derivePubKey(keyManager.delayedPaymentPoint(channelKeyPath).publicKey, localPerCommitmentPoint)
               localDelayedPaymentPubkey
             case _ =>
@@ -1306,25 +1306,45 @@ object Helpers {
       }
     }
 
+    /**
+     *
+     * @param witness    input witness
+     * @param scriptTree taproot script tree
+     * @param scriptId   taproot script id
+     * @return true if witness spends the script in the script tree with the given script id
+     */
+    def witnessSpendsScriptId(witness: ScriptWitness, scriptTree: ScriptTree, scriptId: Int): Boolean = {
+      witness.stack.size >= 3 && witness.stack(witness.stack.size - 2) == KotlinUtils.kmp2scala(scriptTree.findScript(scriptId).getScript)
+    }
+
     def isHtlcTimeout(tx: Transaction, localCommitPublished: LocalCommitPublished): Boolean = {
-      tx.txIn.filter(txIn => localCommitPublished.htlcTxs.get(txIn.outPoint) match {
-        case Some(Some(_: HtlcTimeoutTx)) => true
+      tx.txIn.exists(txIn => localCommitPublished.htlcTxs.get(txIn.outPoint) match {
+        case Some(Some(htlcTimeOutTx: HtlcTimeoutTx)) if htlcTimeOutTx.input.scriptTree_opt.isDefined =>
+          // this is a HTLC time-out tx if it uses the left branch of the script tree
+          witnessSpendsScriptId(txIn.witness, htlcTimeOutTx.input.scriptTree_opt.get.scriptTree, 0)
+        case Some(Some(_: HtlcTimeoutTx)) => Scripts.extractPaymentHashFromHtlcTimeout.isDefinedAt(txIn.witness)
         case _ => false
-      }).map(_.witness).collect(Scripts.extractPaymentHashFromHtlcTimeout).nonEmpty
+      })
     }
 
     def isHtlcSuccess(tx: Transaction, localCommitPublished: LocalCommitPublished): Boolean = {
-      tx.txIn.filter(txIn => localCommitPublished.htlcTxs.get(txIn.outPoint) match {
-        case Some(Some(_: HtlcSuccessTx)) => true
+      tx.txIn.exists(txIn => localCommitPublished.htlcTxs.get(txIn.outPoint) match {
+        case Some(Some(htlcSuccessTx: HtlcSuccessTx)) if htlcSuccessTx.input.scriptTree_opt.isDefined =>
+          // this is a HTLC success tx if it uses the right branch of the script tree
+          witnessSpendsScriptId(txIn.witness, htlcSuccessTx.input.scriptTree_opt.get.scriptTree, 1)
+        case Some(Some(_: HtlcSuccessTx)) => Scripts.extractPreimageFromHtlcSuccess.isDefinedAt(txIn.witness)
         case _ => false
-      }).map(_.witness).collect(Scripts.extractPreimageFromHtlcSuccess).nonEmpty
+      })
     }
 
     def isClaimHtlcTimeout(tx: Transaction, remoteCommitPublished: RemoteCommitPublished): Boolean = {
-      tx.txIn.filter(txIn => remoteCommitPublished.claimHtlcTxs.get(txIn.outPoint) match {
-        case Some(Some(_: ClaimHtlcTimeoutTx)) => true
+      tx.txIn.exists(txIn => remoteCommitPublished.claimHtlcTxs.get(txIn.outPoint) match {
+        case Some(Some(c: ClaimHtlcTimeoutTx)) if c.input.scriptTree_opt.isDefined =>
+          // this is a HTLC timeout tx if it uses the left branch of the script tree
+          witnessSpendsScriptId(txIn.witness, c.input.scriptTree_opt.get.scriptTree, 0)
+        case Some(Some(_: ClaimHtlcTimeoutTx)) => Scripts.extractPaymentHashFromClaimHtlcTimeout.isDefinedAt(txIn.witness)
         case _ => false
-      }).map(_.witness).collect(Scripts.extractPaymentHashFromClaimHtlcTimeout).nonEmpty
+      })
     }
 
     def isClaimHtlcSuccess(tx: Transaction, remoteCommitPublished: RemoteCommitPublished): Boolean = {

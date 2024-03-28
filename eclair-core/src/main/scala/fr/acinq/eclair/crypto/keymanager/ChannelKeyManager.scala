@@ -42,7 +42,9 @@ trait ChannelKeyManager {
 
   def commitmentPoint(channelKeyPath: DeterministicWallet.KeyPath, index: Long): Crypto.PublicKey
 
-  def commitmentNonce(fundingKeyPath: DeterministicWallet.KeyPath, fundingTxIndex: Long, channelKeyPath: DeterministicWallet.KeyPath, index: Long): (SecretNonce, IndividualNonce)
+  def verificationNonce(fundingKeyPath: DeterministicWallet.KeyPath, fundingTxIndex: Long, channelKeyPath: DeterministicWallet.KeyPath, index: Long): (SecretNonce, IndividualNonce)
+
+  def signingNonce(fundingKeyPath: DeterministicWallet.KeyPath, fundingTxIndex: Long): (SecretNonce, IndividualNonce)
 
   def closingNonce(fundingKeyPath: DeterministicWallet.KeyPath, fundingTxIndex: Long): (SecretNonce, IndividualNonce)
 

@@ -411,7 +411,9 @@ case class CommitSig(channelId: ByteVector32,
 case class RevokeAndAck(channelId: ByteVector32,
                         perCommitmentSecret: PrivateKey,
                         nextPerCommitmentPoint: PublicKey,
-                        tlvStream: TlvStream[RevokeAndAckTlv] = TlvStream.empty) extends HtlcMessage with HasChannelId
+                        tlvStream: TlvStream[RevokeAndAckTlv] = TlvStream.empty) extends HtlcMessage with HasChannelId {
+  val nexLocalNonce_opt: Option[IndividualNonce] = tlvStream.get[protocol.RevokeAndAckTlv.NextLocalNonceTlv].map(_.nonce)
+}
 
 case class UpdateFee(channelId: ByteVector32,
                      feeratePerKw: FeeratePerKw,

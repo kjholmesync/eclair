@@ -115,7 +115,7 @@ private[channel] object ChannelCodecs4 {
       ("outPoint" | outPointCodec) ::
         ("txOut" | txOutCodec) ::
         ("redeemScript" | lengthDelimited(bytes)) ::
-        ("scriptTee_opt" | provide(Option.empty[ScriptTree]))).as[InputInfo]
+        ("scriptTee_opt" | provide(Option.empty[ScriptTreeAndInternalKey]))).as[InputInfo]
 
     val outputInfoCodec: Codec[OutputInfo] = (
       ("index" | uint32) ::

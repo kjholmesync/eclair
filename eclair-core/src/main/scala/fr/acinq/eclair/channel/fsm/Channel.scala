@@ -533,7 +533,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           log.debug("ignoring CMD_SIGN (nothing to sign)")
           stay()
         case Right(_) =>
-          d.commitments.sendCommit(keyManager) match {
+          d.commitments.sendCommit(keyManager, this.remoteNextLocalNonce_opt) match {
             case Right((commitments1, commit)) =>
               log.debug("sending a new sig, spec:\n{}", commitments1.latest.specs2String)
               val nextRemoteCommit = commitments1.latest.nextRemoteCommit_opt.get.commit
@@ -636,6 +636,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
       d.commitments.receiveRevocation(revocation, nodeParams.onChainFeeConf.feerateToleranceFor(remoteNodeId).dustTolerance.maxExposure) match {
         case Right((commitments1, actions)) =>
           cancelTimer(RevocationTimeout.toString)
+          this.remoteNextLocalNonce_opt = revocation.nexLocalNonce_opt
           log.debug("received a new rev, spec:\n{}", commitments1.latest.specs2String)
           actions.foreach {
             case PostRevocationAction.RelayHtlc(add) =>
@@ -655,13 +656,16 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           if (d.remoteShutdown.isDefined && !commitments1.changes.localHasUnsignedOutgoingHtlcs) {
             // we were waiting for our pending htlcs to be signed before replying with our local shutdown
             val finalScriptPubKey = getOrGenerateFinalScriptPubKey(d)
-            val localShutdown = d.commitments.params.commitmentFormat match {
+            val tlvStream: TlvStream[ShutdownTlv] = d.commitments.params.commitmentFormat match {
               case SimpleTaprootChannelsStagingCommitmentFormat =>
-                val localNonce = keyManager.commitmentNonce(d.commitments.params.localParams.fundingKeyPath, 0, keyManager.keyPath(d.commitments.params.localParams, d.commitments.params.channelConfig), d.commitments.localCommitIndex + 1)
-                Shutdown(d.channelId, finalScriptPubKey, TlvStream(ShutdownTlv.ShutdownNonce(localNonce._2)))
+                log.info("generating closing nonce {} with fundingKeyPath = {} fundingTxIndex = {}", closingNonce, d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex)
+                closingNonce = Some(keyManager.closingNonce(d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex))
+                TlvStream(ShutdownTlv.ShutdownNonce(closingNonce.get._2))
               case _ =>
-                Shutdown(d.channelId, finalScriptPubKey)
+                TlvStream.empty
             }
+            val localShutdown = Shutdown(d.channelId, finalScriptPubKey, tlvStream)
+
             // note: it means that we had pending htlcs to sign, therefore we go to SHUTDOWN, not to NEGOTIATING
             require(commitments1.latest.remoteCommit.spec.htlcs.nonEmpty, "we must have just signed new htlcs, otherwise we would have sent our Shutdown earlier")
             goto(SHUTDOWN) using DATA_SHUTDOWN(commitments1, localShutdown, d.remoteShutdown.get, d.closingFeerates) storing() sending localShutdown
@@ -686,13 +690,15 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
         d.commitments.params.validateLocalShutdownScript(localScriptPubKey) match {
           case Left(e) => handleCommandError(e, c)
           case Right(localShutdownScript) =>
-            val shutdown = d.commitments.params.commitmentFormat match {
+            val tlvStream: TlvStream[ShutdownTlv] = d.commitments.params.commitmentFormat match {
               case SimpleTaprootChannelsStagingCommitmentFormat =>
+                log.info("generating closing nonce {} with fundingKeyPath = {} fundingTxIndex = {}", closingNonce, d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex)
                 closingNonce = Some(keyManager.closingNonce(d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex))
-                Shutdown(d.channelId, getOrGenerateFinalScriptPubKey(d), TlvStream(ShutdownTlv.ShutdownNonce(closingNonce.get._2)))
+                TlvStream(ShutdownTlv.ShutdownNonce(closingNonce.get._2))
               case _ =>
-                Shutdown(d.channelId, localShutdownScript)
+                TlvStream.empty
             }
+            val shutdown = Shutdown(d.channelId, localShutdownScript, tlvStream)
             handleCommandSuccess(c, d.copy(localShutdown = Some(shutdown), closingFeerates = c.feerates)) storing() sending shutdown
         }
       }
@@ -744,14 +750,15 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
             case Some(localShutdown) =>
               (localShutdown, Nil)
             case None =>
-              val localShutdown = d.commitments.params.commitmentFormat match {
+              val tlvStream: TlvStream[ShutdownTlv] = d.commitments.params.commitmentFormat match {
                 case SimpleTaprootChannelsStagingCommitmentFormat =>
-                  closingNonce = Some(keyManager.closingNonce(d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex))
                   log.info("generating closing nonce {} with fundingKeyPath = {} fundingTxIndex = {}", closingNonce, d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex)
-                  Shutdown(d.channelId, getOrGenerateFinalScriptPubKey(d), TlvStream(ShutdownTlv.ShutdownNonce(closingNonce.get._2)))
+                  closingNonce = Some(keyManager.closingNonce(d.commitments.latest.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex))
+                  TlvStream(ShutdownTlv.ShutdownNonce(closingNonce.get._2))
                 case _ =>
-                  Shutdown(d.channelId, getOrGenerateFinalScriptPubKey(d))
+                  TlvStream.empty
               }
+              val localShutdown = Shutdown(d.channelId, getOrGenerateFinalScriptPubKey(d), tlvStream)
               // we need to send our shutdown if we didn't previously
               (localShutdown, localShutdown :: Nil)
           }
@@ -1311,7 +1318,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           log.debug("ignoring CMD_SIGN (nothing to sign)")
           stay()
         case Right(_) =>
-          d.commitments.sendCommit(keyManager) match {
+          d.commitments.sendCommit(keyManager, this.remoteNextLocalNonce_opt) match {
             case Right((commitments1, commit)) =>
               log.debug("sending a new sig, spec:\n{}", commitments1.latest.specs2String)
               val nextRemoteCommit = commitments1.latest.nextRemoteCommit_opt.get.commit
@@ -1907,7 +1914,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
       val nextFundingTlv: Set[ChannelReestablishTlv] = Set(ChannelReestablishTlv.NextFundingTlv(d.signingSession.fundingTx.txId))
       val myNextLocalNonce = d.channelParams.commitmentFormat match {
         case SimpleTaprootChannelsStagingCommitmentFormat =>
-          val (_, publicNonce) = keyManager.commitmentNonce(d.channelParams.localParams.fundingKeyPath, 0, channelKeyPath, 0)
+          val (_, publicNonce) = keyManager.verificationNonce(d.channelParams.localParams.fundingKeyPath, 0, channelKeyPath, 0)
           Set(NextLocalNonceTlv(publicNonce))
         case _ => Set.empty
       }
@@ -1947,7 +1954,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
       }
       val myNextLocalNonce = d.commitments.params.commitmentFormat match {
         case SimpleTaprootChannelsStagingCommitmentFormat =>
-          val (_, publicNonce) = keyManager.commitmentNonce(d.commitments.params.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex, channelKeyPath, d.commitments.localCommitIndex)
+          val (_, publicNonce) = keyManager.verificationNonce(d.commitments.params.localParams.fundingKeyPath, d.commitments.latest.fundingTxIndex, channelKeyPath, d.commitments.localCommitIndex)
           Set(NextLocalNonceTlv(publicNonce))
         case _ => Set.empty
       }
@@ -2081,7 +2088,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
             val nextPerCommitmentPoint = keyManager.commitmentPoint(channelKeyPath, 1)
             val tlvStream: TlvStream[ChannelReadyTlv] = d.commitments.params.commitmentFormat match {
               case SimpleTaprootChannelsStagingCommitmentFormat =>
-                val (_, nextLocalNonce) = keyManager.commitmentNonce(d.commitments.params.localParams.fundingKeyPath, fundingTxIndex = 0, channelKeyPath, 1)
+                val (_, nextLocalNonce) = keyManager.verificationNonce(d.commitments.params.localParams.fundingKeyPath, fundingTxIndex = 0, channelKeyPath, 1)
                 TlvStream(ChannelTlv.NextLocalNonceTlv(nextLocalNonce))
               case _ => TlvStream()
             }
