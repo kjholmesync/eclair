@@ -1193,23 +1193,44 @@ object Helpers {
         // we retrieve the information needed to rebuild htlc scripts
         val htlcInfos = db.listHtlcInfos(channelId, commitmentNumber)
         log.info("got {} htlcs for commitmentNumber={}", htlcInfos.size, commitmentNumber)
-        val htlcsRedeemScripts = (
-          htlcInfos.map { case (paymentHash, cltvExpiry) => Scripts.htlcReceived(remoteHtlcPubkey, localHtlcPubkey, remoteRevocationPubkey, Crypto.ripemd160(paymentHash), cltvExpiry, commitmentFormat) } ++
-            htlcInfos.map { case (paymentHash, _) => Scripts.htlcOffered(remoteHtlcPubkey, localHtlcPubkey, remoteRevocationPubkey, Crypto.ripemd160(paymentHash), commitmentFormat) }
-          )
-          .map(redeemScript => Script.write(pay2wsh(redeemScript)) -> Script.write(redeemScript))
-          .toMap
 
-        // and finally we steal the htlc outputs
-        val htlcPenaltyTxs = commitTx.txOut.zipWithIndex.collect { case (txOut, outputIndex) if htlcsRedeemScripts.contains(txOut.publicKeyScript) =>
-          val htlcRedeemScript = htlcsRedeemScripts(txOut.publicKeyScript)
-          withTxGenerationLog("htlc-penalty") {
-            Transactions.makeHtlcPenaltyTx(commitTx, outputIndex, htlcRedeemScript, localParams.dustLimit, finalScriptPubKey, feeratePenalty).map(htlcPenalty => {
-              val sig = keyManager.sign(htlcPenalty, keyManager.revocationPoint(channelKeyPath), remotePerCommitmentSecret, TxOwner.Local, commitmentFormat)
-              Transactions.addSigs(htlcPenalty, sig, remoteRevocationPubkey)
-            })
-          }
-        }.toList.flatten
+        val htlcPenaltyTxs = commitmentFormat match {
+          case SimpleTaprootChannelsStagingCommitmentFormat =>
+            val scriptTrees = (
+              htlcInfos.map { case (paymentHash, cltvExpiry) => Taproot.receivedHtlcTree(remoteHtlcPubkey, localHtlcPubkey, paymentHash, cltvExpiry) } ++
+                htlcInfos.map { case (paymentHash, _) => Taproot.offeredHtlcTree(remoteHtlcPubkey, localHtlcPubkey, paymentHash) })
+              .map(scriptTree => Script.write(Script.pay2tr(remoteRevocationPubkey.xOnly, Some(scriptTree))) -> scriptTree)
+              .toMap
+
+            commitTx.txOut.zipWithIndex.collect { case (txOut, outputIndex) if scriptTrees.contains(txOut.publicKeyScript) =>
+              val scriptTree = scriptTrees(txOut.publicKeyScript)
+              withTxGenerationLog("htlc-penalty") {
+                Transactions.makeHtlcPenaltyTx(commitTx, outputIndex, ScriptTreeAndInternalKey(scriptTree, remoteRevocationPubkey.xOnly), localParams.dustLimit, finalScriptPubKey, feeratePenalty).map(htlcPenalty => {
+                  val sig = keyManager.sign(htlcPenalty, keyManager.revocationPoint(channelKeyPath), remotePerCommitmentSecret, TxOwner.Local, commitmentFormat)
+                  Transactions.addSigs(htlcPenalty, sig, remoteRevocationPubkey, commitmentFormat)
+                })
+              }
+            }.toList.flatten
+
+          case _ =>
+            val htlcsRedeemScripts = (
+              htlcInfos.map { case (paymentHash, cltvExpiry) => Scripts.htlcReceived(remoteHtlcPubkey, localHtlcPubkey, remoteRevocationPubkey, Crypto.ripemd160(paymentHash), cltvExpiry, commitmentFormat) } ++
+                htlcInfos.map { case (paymentHash, _) => Scripts.htlcOffered(remoteHtlcPubkey, localHtlcPubkey, remoteRevocationPubkey, Crypto.ripemd160(paymentHash), commitmentFormat) }
+              )
+              .map(redeemScript => Script.write(pay2wsh(redeemScript)) -> Script.write(redeemScript))
+              .toMap
+
+            // and finally we steal the htlc outputs
+            commitTx.txOut.zipWithIndex.collect { case (txOut, outputIndex) if htlcsRedeemScripts.contains(txOut.publicKeyScript) =>
+              val htlcRedeemScript = htlcsRedeemScripts(txOut.publicKeyScript)
+              withTxGenerationLog("htlc-penalty") {
+                Transactions.makeHtlcPenaltyTx(commitTx, outputIndex, htlcRedeemScript, localParams.dustLimit, finalScriptPubKey, feeratePenalty).map(htlcPenalty => {
+                  val sig = keyManager.sign(htlcPenalty, keyManager.revocationPoint(channelKeyPath), remotePerCommitmentSecret, TxOwner.Local, commitmentFormat)
+                  Transactions.addSigs(htlcPenalty, sig, remoteRevocationPubkey, commitmentFormat)
+                })
+              }
+            }.toList.flatten
+        }
 
         RevokedCommitPublished(
           commitTx = commitTx,
