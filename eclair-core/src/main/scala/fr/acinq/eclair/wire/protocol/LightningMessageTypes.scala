@@ -406,6 +406,7 @@ case class CommitSig(channelId: ByteVector32,
                      tlvStream: TlvStream[CommitSigTlv] = TlvStream.empty) extends HtlcMessage with HasChannelId {
   val batchSize: Int = tlvStream.get[CommitSigTlv.BatchTlv].map(_.size).getOrElse(1)
   val partialSignature_opt: Option[PartialSignatureWithNonce] = tlvStream.get[CommitSigTlv.PartialSignatureWithNonceTlv].map(_.partialSigWithNonce)
+  val sigOrPartialSig: Either[ByteVector64, PartialSignatureWithNonce] = partialSignature_opt.toRight(signature)
 }
 
 case class RevokeAndAck(channelId: ByteVector32,

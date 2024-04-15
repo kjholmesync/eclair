@@ -246,7 +246,7 @@ object LocalCommit {
         }
         HtlcTxAndRemoteSig(htlcTx, remoteSig)
     }
-    Right(LocalCommit(localCommitIndex, spec, CommitTxAndRemoteSig(localCommitTx, commit.partialSignature_opt.toRight(commit.signature)), htlcTxsAndRemoteSigs))
+    Right(LocalCommit(localCommitIndex, spec, CommitTxAndRemoteSig(localCommitTx, commit.sigOrPartialSig), htlcTxsAndRemoteSigs))
   }
 }
 
@@ -1206,7 +1206,7 @@ case class Commitments(params: ChannelParams,
   /** This function should be used to ignore a commit_sig that we've already received. */
   def ignoreRetransmittedCommitSig(commitSig: CommitSig): Boolean = {
     val latestRemoteSig = latest.localCommit.commitTxAndRemoteSig.remoteSig
-    params.channelFeatures.hasFeature(Features.DualFunding) && commitSig.batchSize == 1 && latestRemoteSig == commitSig.signature // FIXME: once CommitSig has been updated to include partial sigs
+    params.channelFeatures.hasFeature(Features.DualFunding) && commitSig.batchSize == 1 && latestRemoteSig == commitSig.sigOrPartialSig
   }
 
   def localFundingSigs(fundingTxId: TxId): Option[TxSignatures] = {

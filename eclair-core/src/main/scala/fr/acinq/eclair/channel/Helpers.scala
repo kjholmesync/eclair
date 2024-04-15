@@ -515,10 +515,18 @@ object Helpers {
         val channelKeyPath = keyManager.keyPath(commitments.params.localParams, commitments.params.channelConfig)
         val localPerCommitmentSecret = keyManager.commitmentSecret(channelKeyPath, commitments.localCommitIndex - 1)
         val localNextPerCommitmentPoint = keyManager.commitmentPoint(channelKeyPath, commitments.localCommitIndex + 1)
+        val tlvStream: TlvStream[RevokeAndAckTlv] = commitments.params.commitmentFormat match {
+          case SimpleTaprootChannelsStagingCommitmentFormat =>
+            val (_, nonce) = keyManager.verificationNonce(commitments.params.localParams.fundingKeyPath, commitments.latest.fundingTxIndex, channelKeyPath, commitments.localCommitIndex + 1)
+            TlvStream(RevokeAndAckTlv.NextLocalNonceTlv(nonce))
+          case _ =>
+            TlvStream.empty
+        }
         val revocation = RevokeAndAck(
           channelId = commitments.channelId,
           perCommitmentSecret = localPerCommitmentSecret,
-          nextPerCommitmentPoint = localNextPerCommitmentPoint
+          nextPerCommitmentPoint = localNextPerCommitmentPoint,
+          tlvStream
         )
         checkRemoteCommit(remoteChannelReestablish, retransmitRevocation_opt = Some(revocation))
       } else if (commitments.localCommitIndex > remoteChannelReestablish.nextRemoteRevocationNumber + 1) {
