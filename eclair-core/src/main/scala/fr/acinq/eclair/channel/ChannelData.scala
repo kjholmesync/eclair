@@ -575,14 +575,15 @@ final case class DATA_WAIT_FOR_DUAL_FUNDING_CREATED(channelId: ByteVector32,
                                                     remotePushAmount: MilliSatoshi,
                                                     txBuilder: typed.ActorRef[InteractiveTxBuilder.Command],
                                                     deferred: Option[CommitSig],
-                                                    remoteNextLocalNonce: Option[IndividualNonce],
+                                                    secondRemoteNonce_opt: Option[IndividualNonce],
                                                     replyTo_opt: Option[akka.actor.typed.ActorRef[Peer.OpenChannelResponse]]) extends TransientChannelData
 final case class DATA_WAIT_FOR_DUAL_FUNDING_SIGNED(channelParams: ChannelParams,
                                                    secondRemotePerCommitmentPoint: PublicKey,
                                                    localPushAmount: MilliSatoshi,
                                                    remotePushAmount: MilliSatoshi,
                                                    signingSession: InteractiveTxSigningSession.WaitingForSigs,
-                                                   remoteChannelData_opt: Option[ByteVector]) extends ChannelDataWithoutCommitments
+                                                   remoteChannelData_opt: Option[ByteVector],
+                                                   secondRemoteNonce_opt: Option[IndividualNonce]) extends ChannelDataWithoutCommitments
 final case class DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED(commitments: Commitments,
                                                       localPushAmount: MilliSatoshi,
                                                       remotePushAmount: MilliSatoshi,

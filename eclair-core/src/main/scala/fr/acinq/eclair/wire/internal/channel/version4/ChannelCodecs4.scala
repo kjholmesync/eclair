@@ -1,6 +1,5 @@
 package fr.acinq.eclair.wire.internal.channel.version4
 
-import fr.acinq.bitcoin.ScriptTree
 import fr.acinq.bitcoin.crypto.musig2.IndividualNonce
 import fr.acinq.bitcoin.scalacompat.Crypto.PublicKey
 import fr.acinq.bitcoin.scalacompat.DeterministicWallet.KeyPath
@@ -644,7 +643,8 @@ private[channel] object ChannelCodecs4 {
         ("localPushAmount" | millisatoshi) ::
         ("remotePushAmount" | millisatoshi) ::
         ("status" | interactiveTxWaitingForSigsCodec) ::
-        ("remoteChannelData_opt" | optional(bool8, varsizebinarydata))).as[DATA_WAIT_FOR_DUAL_FUNDING_SIGNED]
+        ("remoteChannelData_opt" | optional(bool8, varsizebinarydata)) ::
+        ("secondRemoteNonce_opt" | provide[Option[IndividualNonce]](None))).as[DATA_WAIT_FOR_DUAL_FUNDING_SIGNED]
 
     val DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED_02_Codec: Codec[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED] = (
       ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::

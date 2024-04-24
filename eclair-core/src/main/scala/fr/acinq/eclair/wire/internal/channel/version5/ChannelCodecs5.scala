@@ -110,24 +110,9 @@ private[channel] object ChannelCodecs5 {
 
     val txCodec: Codec[Transaction] = lengthDelimited(bytes.xmap(d => Transaction.read(d.toArray), d => Transaction.write(d)))
 
-    def scriptTreeAndInternalKey: Codec[ScriptTreeAndInternalKey] = {
-      import fr.acinq.bitcoin.scalacompat.KotlinUtils._
-      import shapeless.{::, HNil}
+    val scriptTreeCodec: Codec[ScriptTree] = lengthDelimited(bytes.xmap(d => ScriptTree.read(d.toArray), d => ByteVector.view(d.write())))
 
-      val leafCodec: Codec[ScriptTree.Leaf] = (int32 :: varsizebinarydata :: int32).xmap[ScriptTree.Leaf]({
-        case a :: b :: c :: HNil => new ScriptTree.Leaf(a, scala2kmp(b), c)
-      }, {
-        l => l.getId :: kmp2scala(l.getScript) :: l.getLeafVersion :: HNil
-      })
-
-      def scriptTreeCodec: Codec[ScriptTree] = lazily {
-        discriminated[ScriptTree].by(bool8)
-          .typecase(false, leafCodec)
-          .typecase(true, (scriptTreeCodec ~ scriptTreeCodec).xmap[ScriptTree.Branch]({ a => new ScriptTree.Branch(a._1, a._2) }, { n: ScriptTree.Branch => n.getLeft -> n.getRight }))
-      }
-
-      (scriptTreeCodec :: xonlyPublicKey).as[ScriptTreeAndInternalKey]
-    }
+    val scriptTreeAndInternalKey: Codec[ScriptTreeAndInternalKey] = (scriptTreeCodec :: xonlyPublicKey).as[ScriptTreeAndInternalKey]
 
     val inputInfoCodec: Codec[InputInfo] = (
       ("outPoint" | outPointCodec) ::
@@ -252,8 +237,15 @@ private[channel] object ChannelCodecs5 {
         ("fundingTxIndex" | uint32) ::
         ("remoteFundingPubkey" | publicKey)).as[InteractiveTxBuilder.Multisig2of2Input]
 
+    private val musig2of2InputCodec: Codec[InteractiveTxBuilder.Musig2Input] = (
+      ("info" | inputInfoCodec) ::
+        ("fundingTxIndex" | uint32) ::
+        ("remoteFundingPubkey" | publicKey) ::
+        ("commitIndex" | uint32)).as[InteractiveTxBuilder.Musig2Input]
+
     private val sharedFundingInputCodec: Codec[InteractiveTxBuilder.SharedFundingInput] = discriminated[InteractiveTxBuilder.SharedFundingInput].by(uint16)
       .typecase(0x01, multisig2of2InputCodec)
+      .typecase(0x02, musig2of2InputCodec)
 
     private val requireConfirmedInputsCodec: Codec[InteractiveTxBuilder.RequireConfirmedInputs] = (("forLocal" | bool8) :: ("forRemote" | bool8)).as[InteractiveTxBuilder.RequireConfirmedInputs]
 
@@ -645,7 +637,8 @@ private[channel] object ChannelCodecs5 {
         ("localPushAmount" | millisatoshi) ::
         ("remotePushAmount" | millisatoshi) ::
         ("status" | interactiveTxWaitingForSigsCodec) ::
-        ("remoteChannelData_opt" | optional(bool8, varsizebinarydata))).as[DATA_WAIT_FOR_DUAL_FUNDING_SIGNED]
+        ("remoteChannelData_opt" | optional(bool8, varsizebinarydata)) ::
+        ("secondRemoteNonce_opt" | optional(bool8, publicNonce))).as[DATA_WAIT_FOR_DUAL_FUNDING_SIGNED]
 
     val DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED_02_Codec: Codec[DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED] = (
       ("commitments" | commitmentsCodecWithoutFirstRemoteCommitIndex) ::
