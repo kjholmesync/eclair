@@ -488,6 +488,19 @@ class LightningMessageCodecsSpec extends AnyFunSuite {
     }
   }
 
+  test("encode/decode recommended_feerates") {
+    val testCases = Seq(
+      RecommendedFeerates(Block.TestnetGenesisBlock.hash, FeeratePerKw(2500 sat), FeeratePerKw(2500 sat)) -> hex"88d1 43497fd7f826957108f4a30fd9cec3aeba79972084e90ead01ea330900000000 000009c4 000009c4",
+      RecommendedFeerates(Block.TestnetGenesisBlock.hash, FeeratePerKw(5000 sat), FeeratePerKw(253 sat)) -> hex"88d1 43497fd7f826957108f4a30fd9cec3aeba79972084e90ead01ea330900000000 00001388 000000fd",
+    )
+    for ((expected, encoded) <- testCases) {
+      val decoded = lightningMessageCodec.decode(encoded.bits).require.value
+      assert(decoded == expected)
+      val reEncoded = lightningMessageCodec.encode(decoded).require.bytes
+      assert(reEncoded == encoded)
+    }
+  }
+
   test("unknown messages") {
     // Non-standard tag number so this message can only be handled by a codec with a fallback
     val unknown = UnknownMessage(tag = 47282, data = ByteVector32.Zeroes.bytes)

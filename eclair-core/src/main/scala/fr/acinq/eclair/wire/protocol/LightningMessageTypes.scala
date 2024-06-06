@@ -604,4 +604,10 @@ case class OnionMessage(blindingKey: PublicKey, onionRoutingPacket: OnionRouting
 
 //
 
+/**
+ * This message informs our peers of the feerates we recommend using.
+ * We may reject funding attempts that use values that are too far from our recommended feerates.
+ */
+case class RecommendedFeerates(chainHash: BlockHash, fundingFeerate: FeeratePerKw, commitmentFeerate: FeeratePerKw) extends SetupMessage with HasChainHash
+
 case class UnknownMessage(tag: Int, data: ByteVector) extends LightningMessage
