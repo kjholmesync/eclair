@@ -434,6 +434,31 @@ object LightningMessageCodecs {
       ("fundingFeerate" | feeratePerKw) ::
       ("commitmentFeerate" | feeratePerKw)).as[RecommendedFeerates]
 
+  val willAddHtlcCodec: Codec[WillAddHtlc] = (
+    ("chainHash" | blockHash) ::
+      ("id" | bytes32) ::
+      ("amount" | millisatoshi) ::
+      ("paymentHash" | bytes32) ::
+      ("expiry" | cltvExpiry) ::
+      ("onionRoutingPacket" | PaymentOnionCodecs.paymentOnionPacketCodec) ::
+      ("tlvStream" | WillAddHtlcTlv.willAddHtlcTlvCodec)).as[WillAddHtlc]
+
+  val willFailHtlcCodec: Codec[WillFailHtlc] = (
+    ("id" | bytes32) ::
+      ("paymentHash" | bytes32) ::
+      ("reason" | varsizebinarydata)).as[WillFailHtlc]
+
+  val willFailMalformedHtlcCodec: Codec[WillFailMalformedHtlc] = (
+    ("id" | bytes32) ::
+      ("paymentHash" | bytes32) ::
+      ("onionHash" | bytes32) ::
+      ("failureCode" | uint16)).as[WillFailMalformedHtlc]
+
+  val cancelOnTheFlyFundingCodec: Codec[CancelOnTheFlyFunding] = (
+    ("channelId" | bytes32) ::
+      ("paymentHashes" | listOfN(uint16, bytes32)) ::
+      ("reason" | varsizebinarydata)).as[CancelOnTheFlyFunding]
+
   val unknownMessageCodec: Codec[UnknownMessage] = (
     ("tag" | uint16) ::
       ("message" | bytes)
@@ -486,6 +511,11 @@ object LightningMessageCodecs {
 
     //
     .typecase(35025, recommendedFeeratesCodec)
+    //
+    .typecase(41041, willAddHtlcCodec)
+    .typecase(41042, willFailHtlcCodec)
+    .typecase(41043, willFailMalformedHtlcCodec)
+    .typecase(41044, cancelOnTheFlyFundingCodec)
     //
     .typecase(37000, spliceInitCodec)
     .typecase(37002, spliceAckCodec)
