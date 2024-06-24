@@ -45,26 +45,26 @@ class ReputationRecorderSpec extends ScalaTestWithActorTestKit(ConfigFactory.loa
   test("standard") { f =>
     import f._
 
-    reputationRecorder ! GetConfidence(replyTo.ref, originNode, isEndorsed = true, uuid1, 2000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, originNode, 7, uuid1, 2000 msat)
     assert(replyTo.expectMessageType[Confidence].value == 0)
-    reputationRecorder ! RecordResult(originNode, isEndorsed = true, uuid1, isSuccess = true)
-    reputationRecorder ! GetConfidence(replyTo.ref, originNode, isEndorsed = true, uuid2, 1000 msat)
+    reputationRecorder ! RecordResult(originNode, 7, uuid1, isSuccess = true)
+    reputationRecorder ! GetConfidence(replyTo.ref, originNode, 7, uuid2, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (2.0 / 4) +- 0.001)
-    reputationRecorder ! GetConfidence(replyTo.ref, originNode, isEndorsed = true, uuid3, 3000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, originNode, 7, uuid3, 3000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (2.0 / 10) +- 0.001)
-    reputationRecorder ! CancelRelay(originNode, isEndorsed = true, uuid3)
-    reputationRecorder ! GetConfidence(replyTo.ref, originNode, isEndorsed = true, uuid4, 1000 msat)
+    reputationRecorder ! CancelRelay(originNode, 7, uuid3)
+    reputationRecorder ! GetConfidence(replyTo.ref, originNode, 7, uuid4, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (2.0 / 6) +- 0.001)
-    reputationRecorder ! RecordResult(originNode, isEndorsed = true, uuid4, isSuccess = true)
-    reputationRecorder ! RecordResult(originNode, isEndorsed = true, uuid2, isSuccess = false)
+    reputationRecorder ! RecordResult(originNode, 7, uuid4, isSuccess = true)
+    reputationRecorder ! RecordResult(originNode, 7, uuid2, isSuccess = false)
     // Not endorsed
-    reputationRecorder ! GetConfidence(replyTo.ref, originNode, isEndorsed = false, uuid5, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, originNode, 0, uuid5, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value == 0)
     // Different origin node
-    reputationRecorder ! GetConfidence(replyTo.ref, randomKey().publicKey, isEndorsed = true, uuid6, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, randomKey().publicKey, 7, uuid6, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value == 0)
     // Very large HTLC
-    reputationRecorder ! GetConfidence(replyTo.ref, originNode, isEndorsed = true, uuid5, 100000000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, originNode, 7, uuid5, 100000000 msat)
     assert(replyTo.expectMessageType[Confidence].value === 0.0 +- 0.001)
   }
 
@@ -73,25 +73,25 @@ class ReputationRecorderSpec extends ScalaTestWithActorTestKit(ConfigFactory.loa
 
     val (a, b, c) = (randomKey().publicKey, randomKey().publicKey, randomKey().publicKey)
 
-    reputationRecorder ! GetTrampolineConfidence(replyTo.ref, Map((a, true) -> 2000.msat, (b, true) -> 4000.msat, (c, false) -> 6000.msat), uuid1)
+    reputationRecorder ! GetTrampolineConfidence(replyTo.ref, Map((a, 7) -> 2000.msat, (b, 7) -> 4000.msat, (c, 0) -> 6000.msat), uuid1)
     assert(replyTo.expectMessageType[Confidence].value == 0)
-    reputationRecorder ! RecordTrampolineSuccess(Map((a, true) -> 1000.msat, (b, true) -> 2000.msat, (c, false) -> 3000.msat), uuid1)
-    reputationRecorder ! GetTrampolineConfidence(replyTo.ref, Map((a, true) -> 1000.msat, (c, false) -> 1000.msat), uuid2)
+    reputationRecorder ! RecordTrampolineSuccess(Map((a, 7) -> 1000.msat, (b, 7) -> 2000.msat, (c, 0) -> 3000.msat), uuid1)
+    reputationRecorder ! GetTrampolineConfidence(replyTo.ref, Map((a, 7) -> 1000.msat, (c, 0) -> 1000.msat), uuid2)
     assert(replyTo.expectMessageType[Confidence].value === (1.0 / 3) +- 0.001)
-    reputationRecorder ! GetTrampolineConfidence(replyTo.ref, Map((a, false) -> 1000.msat, (b, true) -> 2000.msat), uuid3)
+    reputationRecorder ! GetTrampolineConfidence(replyTo.ref, Map((a, 0) -> 1000.msat, (b, 7) -> 2000.msat), uuid3)
     assert(replyTo.expectMessageType[Confidence].value == 0)
-    reputationRecorder ! RecordTrampolineFailure(Set((a, true), (c, false)), uuid2)
-    reputationRecorder ! RecordTrampolineSuccess(Map((a, false) -> 1000.msat, (b, true) -> 2000.msat), uuid3)
+    reputationRecorder ! RecordTrampolineFailure(Set((a, 7), (c, 0)), uuid2)
+    reputationRecorder ! RecordTrampolineSuccess(Map((a, 0) -> 1000.msat, (b, 7) -> 2000.msat), uuid3)
 
-    reputationRecorder ! GetConfidence(replyTo.ref, a, isEndorsed = true, uuid4, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, a, 7, uuid4, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (1.0 / 4) +- 0.001)
-    reputationRecorder ! GetConfidence(replyTo.ref, a, isEndorsed = false, uuid5, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, a, 0, uuid5, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (1.0 / 3) +- 0.001)
-    reputationRecorder ! GetConfidence(replyTo.ref, b, isEndorsed = true, uuid6, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, b, 7, uuid6, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (4.0 / 6) +- 0.001)
-    reputationRecorder ! GetConfidence(replyTo.ref, b, isEndorsed = false, uuid7, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, b, 0, uuid7, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value == 0.0)
-    reputationRecorder ! GetConfidence(replyTo.ref, c, isEndorsed = false, uuid8, 1000 msat)
+    reputationRecorder ! GetConfidence(replyTo.ref, c, 0, uuid8, 1000 msat)
     assert(replyTo.expectMessageType[Confidence].value === (3.0 / 6) +- 0.001)
   }
 }

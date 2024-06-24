@@ -267,7 +267,7 @@ class NodeRelay private(nodeParams: NodeParams,
   private def doSend(upstream: Upstream.Hot.Trampoline, nextPayload: IntermediatePayload.NodeRelay, nextPacket_opt: Option[OnionRoutingPacket]): Behavior[Command] = {
     context.log.debug(s"relaying trampoline payment (amountIn=${upstream.amountIn} expiryIn=${upstream.expiryIn} amountOut=${nextPayload.amountToForward} expiryOut=${nextPayload.outgoingCltv})")
     val totalFee = upstream.amountIn - nextPayload.amountToForward
-    val fees = upstream.received.foldLeft(Map.empty[(PublicKey, Boolean), MilliSatoshi])((fees, r) =>
+    val fees = upstream.received.foldLeft(Map.empty[(PublicKey, Int), MilliSatoshi])((fees, r) =>
       fees.updatedWith((r.receivedFrom, r.add.endorsement))(fee =>
         Some(fee.getOrElse(MilliSatoshi(0)) + r.add.amountMsat * totalFee.toLong / upstream.amountIn.toLong)))
     reputationRecorder ! GetTrampolineConfidence(context.messageAdapter[ReputationRecorder.Confidence](confidence => WrappedConfidence(confidence.value)), fees, relayId)
@@ -307,7 +307,7 @@ class NodeRelay private(nodeParams: NodeParams,
           context.log.debug("trampoline payment fully resolved downstream")
           success(upstream, fulfilledUpstream, paymentSent)
           val totalFee = upstream.amountIn - paymentSent.amountWithFees
-          val fees = upstream.received.foldLeft(Map.empty[(PublicKey, Boolean), MilliSatoshi])((fees, r) =>
+          val fees = upstream.received.foldLeft(Map.empty[(PublicKey, Int), MilliSatoshi])((fees, r) =>
             fees.updatedWith((r.receivedFrom, r.add.endorsement))(fee =>
               Some(fee.getOrElse(MilliSatoshi(0)) + r.add.amountMsat * totalFee.toLong / upstream.amountIn.toLong)))
           reputationRecorder ! RecordTrampolineSuccess(fees, relayId)
