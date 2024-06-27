@@ -139,7 +139,7 @@ private class MessageRelay(nodeParams: NodeParams,
         }
       case EncodedNodeId.WithPublicKey.Wallet(nodeId) =>
         context.log.info("trying to wake up next peer to relay onion message (nodeId={})", nodeId)
-        val notifier = context.spawnAnonymous(Behaviors.supervise(PeerReadyNotifier(nodeId, timeout_opt = Some(Left(nodeParams.wakeUpTimeout)))).onFailure(SupervisorStrategy.stop))
+        val notifier = context.spawnAnonymous(Behaviors.supervise(PeerReadyNotifier(nodeId, timeout_opt = Some(Left(nodeParams.onTheFlyFundingConfig.wakeUpTimeout)))).onFailure(SupervisorStrategy.stop))
         notifier ! PeerReadyNotifier.NotifyWhenPeerReady(context.messageAdapter(WrappedPeerReadyResult))
         waitForWalletNodeUp(msg)
     }
